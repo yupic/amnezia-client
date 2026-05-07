@@ -35,6 +35,8 @@ private:
     int m_socksPort = 10808;
 
     QSharedPointer<IpcProcessInterfaceReplica> m_tun2socksProcess;
+
+    QString m_tunName;
 };
 
 #endif // XRAYPROTOCOL_H
