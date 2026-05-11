@@ -137,6 +137,7 @@ QString VpnProtocol::textConnectionState(Vpn::ConnectionState connectionState)
     case Vpn::ConnectionState::Preparing: return tr("Preparing");
     case Vpn::ConnectionState::Connecting: return tr("Connecting...");
     case Vpn::ConnectionState::Connected: return tr("Connected");
+    case Vpn::ConnectionState::Switching: return tr("Switching...");
     case Vpn::ConnectionState::Disconnecting: return tr("Disconnecting...");
     case Vpn::ConnectionState::Reconnecting: return tr("Reconnecting...");
     case Vpn::ConnectionState::Error: return tr("Error");

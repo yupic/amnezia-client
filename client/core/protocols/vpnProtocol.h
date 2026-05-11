@@ -27,6 +27,7 @@ namespace Vpn
         Preparing,
         Connecting,
         Connected,
+        Switching,
         Disconnecting,
         Reconnecting,
         Error

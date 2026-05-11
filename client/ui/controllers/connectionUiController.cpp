@@ -60,6 +60,12 @@ void ConnectionUiController::onConnectionStateChanged(Vpn::ConnectionState state
         m_connectionStateText = tr("Connected");
         break;
     }
+    case Vpn::ConnectionState::Switching: {
+        m_isConnectionInProgress = true;
+        m_isConnected = true;
+        m_connectionStateText = tr("Switching...");
+        break;
+    }
     case Vpn::ConnectionState::Connecting: {
         m_isConnectionInProgress = true;
         break;
