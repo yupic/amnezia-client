@@ -53,6 +53,7 @@ class WireguardUtilsMacos final : public WireguardUtils {
   QString waitForTunnelName(const QString& filename);
 
   QString m_ifname;
+  QString m_requestedIfname;
   QProcess m_tunnel;
   MacosRouteMonitor* m_rtmonitor = nullptr;
 };
