@@ -16,6 +16,7 @@
 #include "core/repositories/secureAppSettingsRepository.h"
 
 #include "core/vpnTrafficGuard.h"
+#include "core/tunnelSession.h"
 
 #ifdef Q_OS_ANDROID
 #include "core/protocols/androidVpnProtocol.h"
@@ -38,7 +39,10 @@ public:
 
     QSharedPointer<VpnProtocol> vpnProtocol() const;
 
-    const QString &remoteAddress() const;
+    const QString &remoteAddress() const {
+        static const QString empty;
+        return m_active ? m_active->remoteAddress() : empty;
+    }
 
 #ifdef Q_OS_ANDROID
     void restoreConnection();
@@ -74,9 +78,10 @@ private:
     SecureAppSettingsRepository* m_appSettingsRepository;
     QScopedPointer<VpnTrafficGuard> m_trafficGuard;
 
-    QJsonObject m_vpnConfiguration;
     QJsonObject m_routeMode;
-    QString m_remoteAddress;
+
+    TunnelSession* m_active = nullptr;
+    TunnelSession* m_staging = nullptr;
 
     // Only for iOS for now, check counters
     QTimer m_checkTimer;
@@ -92,8 +97,8 @@ private:
 
    void createProtocolConnections();
 
-   void appendSplitTunnelingConfig();
-   void appendKillSwitchConfig();
+   void appendSplitTunnelingConfig(QJsonObject &config);
+   void appendKillSwitchConfig(QJsonObject &config);
 };
 
 #endif // VPNCONNECTION_H
