@@ -45,6 +45,10 @@ class Daemon : public QObject {
   QString logs();
   void cleanLogs();
 
+  bool activateStaging(const InterfaceConfig& config);
+  bool discardStaging();
+  bool promoteStagingToActive(const InterfaceConfig& newConfig);
+
  signals:
   void connected(const QString& pubkey);
   /**
@@ -54,11 +58,17 @@ class Daemon : public QObject {
   void activationFailure();
   void disconnected();
   void backendFailure(DaemonError reason = DaemonError::ERROR_FATAL);
+  void stagingConnected(const QString& pubkey);
+  void stagingFailed();
 
  private:
   bool maybeUpdateResolvers(const InterfaceConfig& config);
   bool addExclusionRoute(const IPAddress& address);
   bool delExclusionRoute(const IPAddress& address);
+  void checkStagingHandshake();
+  QTimer m_stagingHandshakeTimer;
+  QTimer m_stagingTimeoutTimer;
+  InterfaceConfig m_stagingConfig;
 
  protected:
   virtual bool run(Op op, const InterfaceConfig& config) {

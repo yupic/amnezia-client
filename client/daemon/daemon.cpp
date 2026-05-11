@@ -17,6 +17,7 @@
 
 constexpr const char* JSON_ALLOWEDIPADDRESSRANGES = "allowedIPAddressRanges";
 constexpr int HANDSHAKE_POLL_MSEC = 250;
+constexpr int STAGING_HANDSHAKE_TIMEOUT_MSEC = 30000;
 
 namespace {
 
@@ -36,6 +37,17 @@ Daemon::Daemon(QObject* parent) : QObject(parent) {
 
   m_handshakeTimer.setSingleShot(true);
   connect(&m_handshakeTimer, &QTimer::timeout, this, &Daemon::checkHandshake);
+
+  m_stagingHandshakeTimer.setSingleShot(false);
+  connect(&m_stagingHandshakeTimer, &QTimer::timeout,
+          this, &Daemon::checkStagingHandshake);
+
+  m_stagingTimeoutTimer.setSingleShot(true);
+  connect(&m_stagingTimeoutTimer, &QTimer::timeout, this, [this] {
+    logger.warning() << "Staging tunnel handshake timed out";
+    emit stagingFailed();
+    discardStaging();
+  });
 }
 
 Daemon::~Daemon() {
@@ -619,4 +631,138 @@ void Daemon::checkHandshake() {
   if (pendingHandshakes > 0) {
     m_handshakeTimer.start(HANDSHAKE_POLL_MSEC);
   }
+}
+
+bool Daemon::activateStaging(const InterfaceConfig& config) {
+  logger.debug() << "activateStaging: bringing up staging tunnel on" << config.m_ifname;
+
+  discardStaging();
+
+  if (!config.m_serverIpv4AddrIn.isEmpty())
+    addExclusionRoute(IPAddress(config.m_serverIpv4AddrIn));
+  if (!config.m_serverIpv6AddrIn.isEmpty())
+    addExclusionRoute(IPAddress(config.m_serverIpv6AddrIn));
+
+  m_stagingWgutils = createWgUtils();
+  if (!m_stagingWgutils) {
+    logger.error() << "activateStaging: failed to create utils";
+    emit stagingFailed();
+    return false;
+  }
+
+  if (!m_stagingWgutils->addInterface(config)) {
+    logger.error() << "activateStaging: addInterface failed";
+    emit stagingFailed();
+    discardStaging();
+    return false;
+  }
+
+  if (supportIPUtils()) {
+    if (!iputils()->addInterfaceIPs(config) || !iputils()->setMTUAndUp(config)) {
+      logger.error() << "activateStaging: IP setup failed";
+      emit stagingFailed();
+      discardStaging();
+      return false;
+    }
+  }
+
+  if (!m_stagingWgutils->updatePeer(config)) {
+    logger.error() << "activateStaging: updatePeer failed";
+    emit stagingFailed();
+    discardStaging();
+    return false;
+  }
+
+  m_stagingConfig = config;
+  m_stagingHandshakeTimer.start(HANDSHAKE_POLL_MSEC);
+  m_stagingTimeoutTimer.start(STAGING_HANDSHAKE_TIMEOUT_MSEC);
+  return true;
+}
+
+bool Daemon::discardStaging() {
+  m_stagingHandshakeTimer.stop();
+  m_stagingTimeoutTimer.stop();
+
+  if (!m_stagingConfig.m_serverIpv4AddrIn.isEmpty()) {
+    IPAddress addr(m_stagingConfig.m_serverIpv4AddrIn);
+    if (m_excludedAddrSet.contains(addr)) delExclusionRoute(addr);
+  }
+  if (!m_stagingConfig.m_serverIpv6AddrIn.isEmpty()) {
+    IPAddress addr(m_stagingConfig.m_serverIpv6AddrIn);
+    if (m_excludedAddrSet.contains(addr)) delExclusionRoute(addr);
+  }
+
+  if (!m_stagingWgutils) return true;
+
+  m_stagingWgutils->deleteInterface();
+  delete m_stagingWgutils;
+  m_stagingWgutils = nullptr;
+  m_stagingConfig = InterfaceConfig{};
+  return true;
+}
+
+void Daemon::checkStagingHandshake() {
+  if (!m_stagingWgutils) {
+    m_stagingHandshakeTimer.stop();
+    return;
+  }
+
+  for (const WireguardUtils::PeerStatus& peer : m_stagingWgutils->getPeerStatus()) {
+    if (peer.m_handshake != 0) {
+      logger.debug() << "Staging tunnel handshake confirmed for" << peer.m_pubkey;
+      m_stagingHandshakeTimer.stop();
+      m_stagingTimeoutTimer.stop();
+      emit stagingConnected(peer.m_pubkey);
+      return;
+    }
+  }
+}
+
+bool Daemon::promoteStagingToActive(const InterfaceConfig& newConfig) {
+  logger.debug() << "promoteStagingToActive";
+
+  if (!m_stagingWgutils) {
+    logger.error() << "promoteStagingToActive: no staging utils";
+    return false;
+  }
+
+  m_stagingHandshakeTimer.stop();
+  m_stagingTimeoutTimer.stop();
+
+  if (!m_connections.isEmpty()) {
+    const InterfaceConfig& oldConfig = m_connections.first().m_config;
+    for (const IPAddress& ip : oldConfig.m_allowedIPAddressRanges) {
+      wgutils()->deleteRoutePrefix(ip);
+    }
+    wgutils()->deletePeer(oldConfig);
+
+    if (!oldConfig.m_serverIpv4AddrIn.isEmpty()) {
+      IPAddress addr(oldConfig.m_serverIpv4AddrIn);
+      if (m_excludedAddrSet.contains(addr)) delExclusionRoute(addr);
+    }
+    if (!oldConfig.m_serverIpv6AddrIn.isEmpty()) {
+      IPAddress addr(oldConfig.m_serverIpv6AddrIn);
+      if (m_excludedAddrSet.contains(addr)) delExclusionRoute(addr);
+    }
+  }
+  wgutils()->deleteInterface();
+
+  replaceActiveWgUtils(m_stagingWgutils);
+  m_stagingWgutils = nullptr;
+  m_stagingConfig = InterfaceConfig{};
+
+  for (const IPAddress& ip : newConfig.m_allowedIPAddressRanges) {
+    if (!wgutils()->updateRoutePrefix(ip)) {
+      logger.warning() << "promoteStagingToActive: route setup failed for" << ip.toString();
+    }
+  }
+
+  if (!maybeUpdateResolvers(newConfig)) {
+    logger.warning() << "promoteStagingToActive: DNS resolver update failed";
+  }
+
+  m_connections[newConfig.m_hopType] = ConnectionState(newConfig);
+  m_handshakeTimer.start(HANDSHAKE_POLL_MSEC);
+
+  return true;
 }
