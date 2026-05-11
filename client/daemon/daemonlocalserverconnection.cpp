@@ -37,6 +37,10 @@ DaemonLocalServerConnection::DaemonLocalServerConnection(QObject* parent,
           &DaemonLocalServerConnection::disconnected);
   connect(daemon, &Daemon::backendFailure, this,
           &DaemonLocalServerConnection::backendFailure);
+  connect(daemon, &Daemon::stagingConnected,
+          this, &DaemonLocalServerConnection::stagingConnected);
+  connect(daemon, &Daemon::stagingFailed,
+          this, &DaemonLocalServerConnection::stagingFailed);
 }
 
 DaemonLocalServerConnection::~DaemonLocalServerConnection() {
@@ -123,6 +127,33 @@ void DaemonLocalServerConnection::parseCommand(const QByteArray& data) {
     return;
   }
 
+  if (type == "activateStaging") {
+    InterfaceConfig config;
+    if (!Daemon::parseConfig(obj, config)) {
+      logger.error() << "activateStaging: invalid configuration";
+      return;
+    }
+    Daemon::instance()->activateStaging(config);
+    return;
+  }
+
+  if (type == "discardStaging") {
+    Daemon::instance()->discardStaging();
+    return;
+  }
+
+  if (type == "promoteStagingToActive") {
+    InterfaceConfig config;
+    if (!Daemon::parseConfig(obj, config)) {
+      logger.error() << "promoteStagingToActive: invalid configuration";
+      return;
+    }
+    if (!Daemon::instance()->promoteStagingToActive(config)) {
+      logger.error() << "promoteStagingToActive failed";
+    }
+    return;
+  }
+
   if (type == "status") {
     QJsonObject obj = Daemon::instance()->getStatus();
     obj.insert("type", "status");
@@ -163,6 +194,19 @@ void DaemonLocalServerConnection::backendFailure(DaemonError err) {
   QJsonObject obj;
   obj.insert("type", "backendFailure");
   obj.insert("errorCode", static_cast<int>(err));
+  write(obj);
+}
+
+void DaemonLocalServerConnection::stagingConnected(const QString& pubkey) {
+  QJsonObject obj;
+  obj.insert("type", "stagingConnected");
+  obj.insert("pubkey", pubkey);
+  write(obj);
+}
+
+void DaemonLocalServerConnection::stagingFailed() {
+  QJsonObject obj;
+  obj.insert("type", "stagingFailed");
   write(obj);
 }
 

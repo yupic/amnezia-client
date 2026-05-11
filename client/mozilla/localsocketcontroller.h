@@ -28,6 +28,10 @@ class LocalSocketController final : public ControllerImpl {
 
   void deactivate() override;
 
+  void activateStaging(const QJsonObject& rawConfig, const QString& stagingIfname) override;
+  void discardStaging() override;
+  void promoteStagingToActive(const QJsonObject& rawConfig, const QString& stagingIfname) override;
+
   void checkStatus() override;
 
   void getBackendLogs(std::function<void(const QString&)>&& callback) override;
@@ -39,6 +43,9 @@ class LocalSocketController final : public ControllerImpl {
  private:
   void initializeInternal();
   void disconnectInternal();
+
+  QJsonObject buildActivateJson(const QJsonObject& rawConfig,
+                                const QString& ifname);
 
   void daemonConnected();
   void errorOccurred(QLocalSocket::LocalSocketError socketError);

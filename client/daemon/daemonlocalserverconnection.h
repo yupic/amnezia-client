@@ -26,6 +26,8 @@ class DaemonLocalServerConnection final : public QObject {
   void connected(const QString& pubkey);
   void disconnected();
   void backendFailure(DaemonError err);
+  void stagingConnected(const QString& pubkey);
+  void stagingFailed();
 
   void write(const QJsonObject& obj);
 

@@ -23,6 +23,7 @@
 #include "leakdetector.h"
 #include "logger.h"
 #include "daemon/daemonerrors.h"
+#include "daemon/wireguardutils.h"
 
 #include "core/utils/protocolEnum.h"
 #include "core/protocols/protocolUtils.h"
@@ -121,7 +122,8 @@ void LocalSocketController::daemonConnected() {
   checkStatus();
 }
 
-void LocalSocketController::activate(const QJsonObject &rawConfig) {
+QJsonObject LocalSocketController::buildActivateJson(const QJsonObject& rawConfig,
+                                                     const QString& ifname) {
   QString protocolName = rawConfig.value("protocol").toString();
 
   int splitTunnelType = rawConfig.value("splitTunnelType").toInt();
@@ -134,7 +136,6 @@ void LocalSocketController::activate(const QJsonObject &rawConfig) {
   QJsonObject wgConfig = rawConfig.value(protocolName + "_config_data").toObject();
 
   QJsonObject json;
-  json.insert("type", "activate");
   //  json.insert("hopindex", QJsonValue((double)hop.m_hopindex));
   json.insert("privateKey", wgConfig.value(amnezia::configKey::clientPrivKey));
   json.insert("deviceIpv4Address", wgConfig.value(amnezia::configKey::clientIp));
@@ -292,6 +293,31 @@ void LocalSocketController::activate(const QJsonObject &rawConfig) {
     json.insert(amnezia::configKey::specialJunk5, wgConfig.value(amnezia::configKey::specialJunk5));
   }
 
+  json.insert("ifname", ifname);
+  return json;
+}
+
+void LocalSocketController::activate(const QJsonObject& rawConfig) {
+  QJsonObject json = buildActivateJson(rawConfig, WG_INTERFACE);
+  json.insert("type", "activate");
+  write(json);
+}
+
+void LocalSocketController::activateStaging(const QJsonObject& rawConfig, const QString& stagingIfname) {
+  QJsonObject json = buildActivateJson(rawConfig, stagingIfname);
+  json.insert("type", "activateStaging");
+  write(json);
+}
+
+void LocalSocketController::discardStaging() {
+  QJsonObject json;
+  json.insert("type", "discardStaging");
+  write(json);
+}
+
+void LocalSocketController::promoteStagingToActive(const QJsonObject& rawConfig, const QString& stagingIfname) {
+  QJsonObject json = buildActivateJson(rawConfig, stagingIfname);
+  json.insert("type", "promoteStagingToActive");
   write(json);
 }
 
@@ -491,6 +517,17 @@ void LocalSocketController::parseCommand(const QByteArray& command) {
     emit statusUpdated("", m_deviceIpv4, 0, 0);
 
     emit connected(pubkey.toString());
+    return;
+  }
+
+  if (type == "stagingConnected") {
+    QJsonValue pubkey = obj.value("pubkey");
+    emit stagingConnected(pubkey.isString() ? pubkey.toString() : QString());
+    return;
+  }
+
+  if (type == "stagingFailed") {
+    emit stagingFailed();
     return;
   }
 
