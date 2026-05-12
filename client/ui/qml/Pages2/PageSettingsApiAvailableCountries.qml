@@ -184,15 +184,11 @@ PageType {
                     imageSource: "qrc:/images/controls/download.svg"
 
                     checked: index === ApiCountryModel.currentIndex
-                    checkable: !ConnectionController.isConnected
+                    checkable: !ConnectionController.isConnectionInProgress
 
                     onClicked: {
                         if (ConnectionController.isConnectionInProgress) {
-                            PageController.showNotificationMessage(qsTr("Unable change server location while trying to make an active connection"))
-                            return
-                        }
-                        if (ConnectionController.isConnected) {
-                            PageController.showNotificationMessage(qsTr("Unable change server location while there is an active connection"))
+                            PageController.showNotificationMessage(qsTr("Unable to change server location while connection is in progress"))
                             return
                         }
 
@@ -200,8 +196,12 @@ PageType {
                             PageController.showBusyIndicator(true)
                             var prevIndex = ApiCountryModel.currentIndex
                             ApiCountryModel.currentIndex = index
-                            if (!SubscriptionUiController.updateServiceFromGateway(ServersUiController.getProcessedServerIndex(), countryCode, countryName)) {
+                            var success = SubscriptionUiController.updateServiceFromGateway(
+                                ServersUiController.getProcessedServerIndex(), countryCode, countryName)
+                            if (!success) {
                                 ApiCountryModel.currentIndex = prevIndex
+                            } else if (ConnectionController.isConnected) {
+                                ConnectionController.openConnection()
                             }
                             PageController.showBusyIndicator(false)
                         }

@@ -51,6 +51,7 @@ signals:
     void connectButtonClicked();
     void preparingConfig();
     void prepareConfig();
+    void serverSwitchFailed();
 
 private:
     Vpn::ConnectionState getCurrentConnectionState();
