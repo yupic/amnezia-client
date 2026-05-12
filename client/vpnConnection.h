@@ -63,6 +63,7 @@ signals:
     void bytesChanged(quint64 receivedBytes, quint64 sentBytes);
     void connectionStateChanged(Vpn::ConnectionState state);
     void vpnProtocolError(amnezia::ErrorCode error);
+    void serverSwitchFailed();
 
     void serviceIsNotReady();
 
@@ -99,6 +100,12 @@ private:
 
    void appendSplitTunnelingConfig(QJsonObject &config);
    void appendKillSwitchConfig(QJsonObject &config);
+
+   void startStagingSwitch(DockerContainer container, const QJsonObject &vpnConfiguration);
+
+private slots:
+   void onStagingHandshakeConfirmed(const QString &pubkey);
+   void onStagingFailed();
 };
 
 #endif // VPNCONNECTION_H

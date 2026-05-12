@@ -106,6 +106,13 @@ QString VpnProtocol::vpnLocalAddress() const
     return m_vpnLocalAddress;
 }
 
+bool VpnProtocol::isWireGuardBased(amnezia::DockerContainer container)
+{
+    return container == amnezia::DockerContainer::Awg
+        || container == amnezia::DockerContainer::Awg2
+        || container == amnezia::DockerContainer::WireGuard;
+}
+
 VpnProtocol *VpnProtocol::factory(DockerContainer container, const QJsonObject &configuration)
 {
     switch (container) {

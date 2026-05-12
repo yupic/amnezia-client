@@ -22,10 +22,17 @@ public:
     ErrorCode start() override;
     void stop() override;
 
+    void activateStaging(const QJsonObject& config, const QString& stagingIfname) override;
+    void discardStaging() override;
+    void promoteStagingToActive(const QJsonObject& config, const QString& stagingIfname) override;
+    void abandon() override;
+    void assumeConnected() override;
+
     ErrorCode startMzImpl();
     ErrorCode stopMzImpl();
 
 private:
+    bool m_abandoned = false;
 
     QScopedPointer<ControllerImpl> m_impl;
 };

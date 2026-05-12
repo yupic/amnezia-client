@@ -70,10 +70,39 @@ ErrorCode WireguardProtocol::startMzImpl()
 
 ErrorCode WireguardProtocol::stopMzImpl()
 {
+    if (m_abandoned) return ErrorCode::NoError;
     m_impl->deactivate();
     return ErrorCode::NoError;
 }
 
+void WireguardProtocol::activateStaging(const QJsonObject& config, const QString& stagingIfname)
+{
+    connect(m_impl.get(), &ControllerImpl::stagingConnected,
+            this, &WireguardProtocol::stagingConnected, Qt::UniqueConnection);
+    connect(m_impl.get(), &ControllerImpl::stagingFailed,
+            this, &WireguardProtocol::stagingFailed, Qt::UniqueConnection);
+    m_impl->activateStaging(config, stagingIfname);
+}
+
+void WireguardProtocol::discardStaging()
+{
+    m_impl->discardStaging();
+}
+
+void WireguardProtocol::promoteStagingToActive(const QJsonObject& config, const QString& stagingIfname)
+{
+    m_impl->promoteStagingToActive(config, stagingIfname);
+}
+
+void WireguardProtocol::abandon()
+{
+    m_abandoned = true;
+}
+
+void WireguardProtocol::assumeConnected()
+{
+    setConnectionState(Vpn::ConnectionState::Connected);
+}
 
 ErrorCode WireguardProtocol::start()
 {

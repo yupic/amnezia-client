@@ -93,6 +93,7 @@ void VpnConnection::setRepositories(SecureServersRepository* serversRepository, 
 {
     m_serversRepository = serversRepository;
     m_appSettingsRepository = appSettingsRepository;
+    m_trafficGuard.reset(new VpnTrafficGuard(appSettingsRepository, this));
 }
 
 QSharedPointer<VpnProtocol> VpnConnection::vpnProtocol() const
@@ -140,7 +141,21 @@ void VpnConnection::connectToVpn(int serverIndex, DockerContainer container, con
 
     const QString resolvedRemote =
         NetworkUtilities::getIPAddress(vpnConfiguration.value(configKey::hostName).toString());
+
 #ifdef AMNEZIA_DESKTOP
+    if (m_vpnProtocol != nullptr
+            && m_connectionState == Vpn::ConnectionState::Connected
+            && VpnProtocol::isWireGuardBased(container)
+            && m_active && VpnProtocol::isWireGuardBased(m_active->container())) {
+        if (!m_trafficGuard->allowEndpoint(resolvedRemote)) {
+            setConnectionState(Vpn::ConnectionState::Error);
+            emit vpnProtocolError(ErrorCode::AmneziaServiceConnectionFailed);
+            return;
+        }
+        startStagingSwitch(container, vpnConfiguration);
+        return;
+    }
+
     if (!m_trafficGuard->allowEndpoint(resolvedRemote)) {
         setConnectionState(Vpn::ConnectionState::Error);
         emit vpnProtocolError(ErrorCode::AmneziaServiceConnectionFailed);
@@ -439,4 +454,105 @@ void VpnConnection::setConnectionState(Vpn::ConnectionState state) {
 
     m_connectionState = state;
     emit connectionStateChanged(state);
+}
+
+void VpnConnection::startStagingSwitch(DockerContainer container,
+                                        const QJsonObject &vpnConfiguration)
+{
+    disconnect(m_vpnProtocol.data(), &VpnProtocol::tunnelAddressesUpdated,
+               m_trafficGuard.data(), &VpnTrafficGuard::applyFirewall);
+    disconnect(m_vpnProtocol.data(), &VpnProtocol::connectionStateChanged,
+               this, &VpnConnection::setConnectionState);
+
+    const QString newRemoteAddress =
+        NetworkUtilities::getIPAddress(vpnConfiguration.value(configKey::hostName).toString());
+
+    const QString stagingIfname = (m_active->tunName() == QString(WG_INTERFACE))
+        ? QString(WG_STAGING_INTERFACE)
+        : QString(WG_INTERFACE);
+
+    QJsonObject config = vpnConfiguration;
+#ifdef AMNEZIA_DESKTOP
+    appendKillSwitchConfig(config);
+#endif
+    appendSplitTunnelingConfig(config);
+
+    m_staging = new TunnelSession(config, container,
+                                   stagingIfname, newRemoteAddress, this);
+
+    connect(m_staging, &TunnelSession::handshakeConfirmed,
+            this, &VpnConnection::onStagingHandshakeConfirmed,
+            static_cast<Qt::ConnectionType>(Qt::QueuedConnection | Qt::UniqueConnection));
+    connect(m_staging, &TunnelSession::failed,
+            this, &VpnConnection::onStagingFailed,
+            static_cast<Qt::ConnectionType>(Qt::QueuedConnection | Qt::UniqueConnection));
+
+    connect(m_vpnProtocol.data(), &VpnProtocol::stagingConnected,
+            m_staging, &TunnelSession::confirmHandshake, Qt::UniqueConnection);
+    connect(m_vpnProtocol.data(), &VpnProtocol::stagingFailed,
+            m_staging, &TunnelSession::markFailed, Qt::UniqueConnection);
+
+    setConnectionState(Vpn::ConnectionState::Switching);
+
+    m_vpnProtocol->activateStaging(m_staging->config(), stagingIfname);
+}
+
+void VpnConnection::onStagingHandshakeConfirmed(const QString &pubkey)
+{
+    Q_UNUSED(pubkey);
+    Q_ASSERT(m_staging);
+
+    m_vpnProtocol->promoteStagingToActive(m_staging->config(), m_staging->tunName());
+
+    m_trafficGuard->revokeEndpoint(m_active->remoteAddress());
+
+    disconnect(m_vpnProtocol.data(), &VpnProtocol::protocolError,
+               this, &VpnConnection::vpnProtocolError);
+    m_vpnProtocol->abandon();
+    m_vpnProtocol.reset();
+
+    delete m_active;
+    m_active = m_staging;
+    m_staging = nullptr;
+
+    m_vpnProtocol.reset(VpnProtocol::factory(m_active->container(), m_active->config()));
+    if (!m_vpnProtocol) {
+        setConnectionState(Vpn::ConnectionState::Error);
+        return;
+    }
+    m_vpnProtocol->prepare();
+    m_vpnProtocol->assumeConnected();
+    m_trafficGuard->setConfig(m_active->config());
+
+    setConnectionState(Vpn::ConnectionState::Connected);
+    createProtocolConnections();
+
+    const QString proto = m_active->config().value("protocol").toString();
+    const QJsonObject vpnCfg = m_active->config().value(proto + "_config_data").toObject();
+    m_trafficGuard->applyFirewall(m_active->remoteAddress(), vpnCfg.value(configKey::clientIp).toString());
+}
+
+void VpnConnection::onStagingFailed()
+{
+    Q_ASSERT(m_staging);
+
+    m_vpnProtocol->discardStaging();
+
+    m_trafficGuard->revokeEndpoint(m_staging->remoteAddress());
+
+    disconnect(m_vpnProtocol.data(), &VpnProtocol::stagingConnected,
+               m_staging, &TunnelSession::confirmHandshake);
+    disconnect(m_vpnProtocol.data(), &VpnProtocol::stagingFailed,
+               m_staging, &TunnelSession::markFailed);
+
+    delete m_staging;
+    m_staging = nullptr;
+
+    connect(m_vpnProtocol.data(), &VpnProtocol::connectionStateChanged,
+            this, &VpnConnection::setConnectionState, Qt::UniqueConnection);
+    connect(m_vpnProtocol.data(), &VpnProtocol::tunnelAddressesUpdated,
+            m_trafficGuard.data(), &VpnTrafficGuard::applyFirewall, Qt::UniqueConnection);
+
+    setConnectionState(Vpn::ConnectionState::Connected);
+    emit serverSwitchFailed();
 }

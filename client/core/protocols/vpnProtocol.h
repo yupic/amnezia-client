@@ -72,6 +72,13 @@ public:
     QString vpnLocalAddress() const;
 
     static VpnProtocol* factory(amnezia::DockerContainer container, const QJsonObject &configuration);
+    static bool isWireGuardBased(amnezia::DockerContainer container);
+
+    virtual void activateStaging(const QJsonObject& config, const QString& stagingIfname) { Q_UNUSED(config) Q_UNUSED(stagingIfname) }
+    virtual void discardStaging() {}
+    virtual void promoteStagingToActive(const QJsonObject& config, const QString& stagingIfname) { Q_UNUSED(config) Q_UNUSED(stagingIfname) }
+    virtual void abandon() {}
+    virtual void assumeConnected() {}
 
 signals:
     void bytesChanged(quint64 receivedBytes, quint64 sentBytes);
@@ -79,6 +86,8 @@ signals:
     void timeoutTimerEvent();
     void protocolError(amnezia::ErrorCode e);
     void tunnelAddressesUpdated(const QString& gateway, const QString& localAddress);
+    void stagingConnected(const QString& pubkey);
+    void stagingFailed();
 
 public slots:
     virtual void onTimeout(); // todo: remove?
