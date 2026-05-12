@@ -22,7 +22,6 @@ class Daemon : public QObject {
   enum Op {
     Up,
     Down,
-    Switch,
   };
 
   explicit Daemon(QObject* parent);
@@ -76,8 +75,6 @@ class Daemon : public QObject {
     Q_UNUSED(config);
     return true;
   }
-  virtual bool supportServerSwitching(const InterfaceConfig& config) const;
-  virtual bool switchServer(const InterfaceConfig& config);
   virtual WireguardUtils* wgutils() const = 0;
   virtual WireguardUtils* createWgUtils() = 0;
   virtual void replaceActiveWgUtils(WireguardUtils* newUtils) = 0;

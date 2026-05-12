@@ -68,59 +68,9 @@ Daemon* Daemon::instance() {
 bool Daemon::activate(const InterfaceConfig& config) {
   Q_ASSERT(wgutils() != nullptr);
 
-  // There are 3 possible scenarios in which this method is called:
-  //
-  // 1. the VPN is off: the method tries to enable the VPN.
-  // 2. the VPN is on and the platform doesn't support the server-switching:
-  //    this method calls deactivate() and then it continues as 1.
-  // 3. the VPN is on and the platform supports the server-switching: this
-  //    method calls switchServer().
-  //
-  // At the end, if the activation succeds, the `connected` signal is emitted.
-  // If the activation abort's for any reason `the `activationFailure` signal is
-  // emitted.
+  // Brings up the VPN interface for a fresh connection.
   logger.debug() << "Activating interface";
   auto emit_failure_guard = qScopeGuard([this] { emit activationFailure(); });
-
-  if (m_connections.contains(config.m_hopType)) {
-    if (supportServerSwitching(config)) {
-      logger.debug() << "Already connected. Server switching supported.";
-
-      if (!switchServer(config)) {
-        return false;
-      }
-
-      if (!dnsutils()->restoreResolvers()) {
-        return false;
-      }
-
-      if (!maybeUpdateResolvers(config)) {
-        return false;
-      }
-
-      bool status = run(Switch, config);
-      logger.debug() << "Connection status:" << status;
-      if (status) {
-        m_connections[config.m_hopType] = ConnectionState(config);
-        m_handshakeTimer.start(HANDSHAKE_POLL_MSEC);
-        emit_failure_guard.dismiss();
-        return true;
-      }
-      return false;
-    }
-
-    logger.warning() << "Already connected. Server switching not supported.";
-    if (!deactivate(false)) {
-      return false;
-    }
-
-    Q_ASSERT(!m_connections.contains(config.m_hopType));
-    if (activate(config)) {
-      emit_failure_guard.dismiss();
-      return true;
-    }
-    return false;
-  }
 
   prepareActivation(config);
 
@@ -504,67 +454,6 @@ QString Daemon::logs() {
 }
 
 void Daemon::cleanLogs() { }
-
-bool Daemon::supportServerSwitching(const InterfaceConfig& config) const {
-  if (!m_connections.contains(config.m_hopType)) {
-    return false;
-  }
-  const InterfaceConfig& current =
-      m_connections.value(config.m_hopType).m_config;
-
-  return current.m_privateKey == config.m_privateKey &&
-         current.m_deviceIpv4Address == config.m_deviceIpv4Address &&
-         current.m_deviceIpv6Address == config.m_deviceIpv6Address &&
-         current.m_serverIpv4Gateway == config.m_serverIpv4Gateway &&
-         current.m_serverIpv6Gateway == config.m_serverIpv6Gateway;
-}
-
-bool Daemon::switchServer(const InterfaceConfig& config) {
-  Q_ASSERT(wgutils() != nullptr);
-
-  logger.debug() << "Switching server for" << config.m_hopType;
-
-  Q_ASSERT(m_connections.contains(config.m_hopType));
-  const InterfaceConfig& lastConfig =
-      m_connections.value(config.m_hopType).m_config;
-
-  // Configure routing for new excluded addresses.
-  for (const QString& i : config.m_excludedAddresses) {
-    addExclusionRoute(IPAddress(i));
-  }
-
-  // Activate the new peer and its routes.
-  if (!wgutils()->updatePeer(config)) {
-    logger.error() << "Server switch failed to update the wireguard interface";
-    return false;
-  }
-  for (const IPAddress& ip : config.m_allowedIPAddressRanges) {
-    if (!wgutils()->updateRoutePrefix(ip)) {
-      logger.error() << "Server switch failed to update the routing table";
-      break;
-    }
-  }
-
-  // Remove routing entries for the old peer.
-  for (const QString& i : lastConfig.m_excludedAddresses) {
-    delExclusionRoute(QHostAddress(i));
-  }
-  for (const IPAddress& ip : lastConfig.m_allowedIPAddressRanges) {
-    if (!config.m_allowedIPAddressRanges.contains(ip)) {
-      wgutils()->deleteRoutePrefix(ip);
-    }
-  }
-
-  // Remove the old peer if it is no longer necessary.
-  if (config.m_serverPublicKey != lastConfig.m_serverPublicKey) {
-    if (!wgutils()->deletePeer(lastConfig)) {
-      return false;
-    }
-  }
-
-  m_connections[config.m_hopType] = ConnectionState(config);
-  return true;
-}
 
 QJsonObject Daemon::getStatus() {
   Q_ASSERT(wgutils() != nullptr);
