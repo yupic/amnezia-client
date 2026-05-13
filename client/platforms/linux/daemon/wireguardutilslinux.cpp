@@ -17,8 +17,6 @@
 #include "leakdetector.h"
 #include "logger.h"
 
-#include "killswitch.h"
-
 constexpr const int WG_TUN_PROC_TIMEOUT = 5000;
 constexpr const char* WG_RUNTIME_DIR = "/var/run/amneziawg";
 
@@ -197,8 +195,6 @@ bool WireguardUtilsLinux::deleteInterface() {
     QDir wgRuntimeDir(WG_RUNTIME_DIR);
     QFile::remove(wgRuntimeDir.filePath(m_ifname + ".name"));
 
-    // double-check + ensure our firewall is installed and enabled
-    KillSwitch::instance()->disableKillSwitch();
     return true;
 }
 
