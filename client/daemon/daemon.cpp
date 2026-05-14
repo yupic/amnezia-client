@@ -55,6 +55,9 @@ Daemon::~Daemon() {
 
   logger.debug() << "Daemon released";
 
+  qDeleteAll(m_tunnels);
+  m_tunnels.clear();
+
   Q_ASSERT(s_daemon == this);
   s_daemon = nullptr;
 }
@@ -66,18 +69,27 @@ Daemon* Daemon::instance() {
 }
 
 bool Daemon::activate(const InterfaceConfig& config) {
-  Q_ASSERT(wgutils() != nullptr);
-
   // Brings up the VPN interface for a fresh connection.
-  logger.debug() << "Activating interface";
+  logger.debug() << "Activating interface" << config.m_ifname;
   auto emit_failure_guard = qScopeGuard([this] { emit activationFailure(); });
 
   prepareActivation(config);
 
+  WireguardUtils* wg = m_tunnels.value(config.m_ifname);
+  if (!wg) {
+    wg = createWgUtils();
+    if (!wg) {
+      logger.error() << "Failed to create wireguard utils.";
+      return false;
+    }
+    m_tunnels.insert(config.m_ifname, wg);
+  }
+  m_primaryIfname = config.m_ifname;
+
   // Bring up the wireguard interface if not already done.
-  if (!wgutils()->interfaceExists()) {
+  if (!wg->interfaceExists()) {
     // Create the interface.
-    if (!wgutils()->addInterface(config)) {
+    if (!wg->addInterface(config)) {
       logger.error() << "Interface creation failed.";
       return false;
     }
@@ -99,7 +111,7 @@ bool Daemon::activate(const InterfaceConfig& config) {
   }
 
   // Add the peer to this interface.
-  if (!wgutils()->updatePeer(config)) {
+  if (!wg->updatePeer(config)) {
     logger.error() << "Peer creation failed.";
     return false;
   }
@@ -110,7 +122,7 @@ bool Daemon::activate(const InterfaceConfig& config) {
 
   // set routing
   for (const IPAddress& ip : config.m_allowedIPAddressRanges) {
-    if (!wgutils()->updateRoutePrefix(ip)) {
+    if (!wg->updateRoutePrefix(ip)) {
       logger.debug() << "Routing configuration failed for" << ip.toString();
       return false;
     }
@@ -119,7 +131,7 @@ bool Daemon::activate(const InterfaceConfig& config) {
   bool status = run(Up, config);
   logger.debug() << "Connection status:" << status;
   if (status) {
-    m_connections[config.m_hopType] = ConnectionState(config);
+    m_connections[config.m_ifname] = ConnectionState(config);
     m_handshakeTimer.start(HANDSHAKE_POLL_MSEC);
     emit_failure_guard.dismiss();
     return true;
@@ -142,7 +154,8 @@ bool Daemon::maybeUpdateResolvers(const InterfaceConfig& config) {
       resolvers.append(QHostAddress(config.m_serverIpv6Gateway));
     }
 
-    if (!dnsutils()->updateResolvers(wgutils()->interfaceName(), resolvers)) {
+    const QString ifname = wgutilsFor(config.m_ifname)->interfaceName();
+    if (!dnsutils()->updateResolvers(ifname, resolvers)) {
       return false;
     }
   }
@@ -176,7 +189,7 @@ bool Daemon::addExclusionRoute(const IPAddress& prefix) {
     m_excludedAddrSet[prefix]++;
     return true;
   }
-  if (!wgutils()->addExclusionRoute(prefix)) {
+  if (!primaryWgutils()->addExclusionRoute(prefix)) {
     return false;
   }
   m_excludedAddrSet[prefix] = 1;
@@ -190,7 +203,7 @@ bool Daemon::delExclusionRoute(const IPAddress& prefix) {
     return true;
   }
   m_excludedAddrSet.remove(prefix);
-  return wgutils()->deleteExclusionRoute(prefix);
+  return primaryWgutils()->deleteExclusionRoute(prefix);
 }
 
 // static
@@ -408,7 +421,7 @@ bool Daemon::parseConfig(const QJsonObject& obj, InterfaceConfig& config) {
 }
 
 bool Daemon::deactivate(bool emitSignals) {
-  Q_ASSERT(wgutils() != nullptr);
+  WireguardUtils* wg = primaryWgutils();
 
   // Deactivate the main interface.
   if (!m_connections.isEmpty()) {
@@ -427,26 +440,31 @@ bool Daemon::deactivate(bool emitSignals) {
     logger.warning() << "Failed to restore DNS resolvers.";
   }
 
-  // Cleanup peers and routing
-  for (const ConnectionState& state : m_connections) {
-    const InterfaceConfig& config = state.m_config;
-    logger.debug() << "Deleting routes for" << config.m_hopType;
-    for (const IPAddress& ip : config.m_allowedIPAddressRanges) {
-      wgutils()->deleteRoutePrefix(ip);
+  if (wg) {
+    // Cleanup peers and routing
+    for (const ConnectionState& state : m_connections) {
+      const InterfaceConfig& config = state.m_config;
+      logger.debug() << "Deleting routes for" << config.m_ifname;
+      for (const IPAddress& ip : config.m_allowedIPAddressRanges) {
+        wg->deleteRoutePrefix(ip);
+      }
+      wg->deletePeer(config);
     }
-    wgutils()->deletePeer(config);
-  }
 
-  // Cleanup routing for excluded addresses.
-  for (auto iterator = m_excludedAddrSet.constBegin();
-       iterator != m_excludedAddrSet.constEnd(); ++iterator) {
-    wgutils()->deleteExclusionRoute(iterator.key());
+    // Cleanup routing for excluded addresses.
+    for (auto iterator = m_excludedAddrSet.constBegin();
+         iterator != m_excludedAddrSet.constEnd(); ++iterator) {
+      wg->deleteExclusionRoute(iterator.key());
+    }
   }
   m_excludedAddrSet.clear();
-
   m_connections.clear();
+
   // Delete the interface
-  return wgutils()->deleteInterface();
+  if (!wg) {
+    return false;
+  }
+  return wg->deleteInterface();
 }
 
 QString Daemon::logs() {
@@ -456,17 +474,17 @@ QString Daemon::logs() {
 void Daemon::cleanLogs() { }
 
 QJsonObject Daemon::getStatus() {
-  Q_ASSERT(wgutils() != nullptr);
   QJsonObject json;
   logger.debug() << "Status request";
 
-  if (!wgutils()->interfaceExists() || m_connections.isEmpty()) {
+  WireguardUtils* wg = primaryWgutils();
+  if (!wg || !wg->interfaceExists() || m_connections.isEmpty()) {
     json.insert("connected", QJsonValue(false));
     return json;
   }
 
   const ConnectionState& connection = m_connections.first();
-  QList<WireguardUtils::PeerStatus> peers = wgutils()->getPeerStatus();
+  QList<WireguardUtils::PeerStatus> peers = wg->getPeerStatus();
   for (const WireguardUtils::PeerStatus& status : peers) {
     if (status.m_pubkey != connection.m_config.m_serverPublicKey) {
       continue;
@@ -487,12 +505,15 @@ QJsonObject Daemon::getStatus() {
 }
 
 void Daemon::checkHandshake() {
-  Q_ASSERT(wgutils() != nullptr);
+  WireguardUtils* wg = primaryWgutils();
+  if (!wg) {
+    return;
+  }
 
   logger.debug() << "Checking for handshake...";
 
   int pendingHandshakes = 0;
-  QList<WireguardUtils::PeerStatus> peers = wgutils()->getPeerStatus();
+  QList<WireguardUtils::PeerStatus> peers = wg->getPeerStatus();
   for (ConnectionState& connection : m_connections) {
     const InterfaceConfig& config = connection.m_config;
     if (connection.m_date.isValid()) {
@@ -532,14 +553,16 @@ bool Daemon::activateStaging(const InterfaceConfig& config) {
   if (!config.m_serverIpv6AddrIn.isEmpty())
     addExclusionRoute(IPAddress(config.m_serverIpv6AddrIn));
 
-  m_stagingWgutils = createWgUtils();
-  if (!m_stagingWgutils) {
+  WireguardUtils* wg = createWgUtils();
+  if (!wg) {
     logger.error() << "activateStaging: failed to create utils";
     emit stagingFailed();
     return false;
   }
+  m_tunnels.insert(config.m_ifname, wg);
+  m_stagingConfig = config;
 
-  if (!m_stagingWgutils->addInterface(config)) {
+  if (!wg->addInterface(config)) {
     logger.error() << "activateStaging: addInterface failed";
     emit stagingFailed();
     discardStaging();
@@ -555,14 +578,13 @@ bool Daemon::activateStaging(const InterfaceConfig& config) {
     }
   }
 
-  if (!m_stagingWgutils->updatePeer(config)) {
+  if (!wg->updatePeer(config)) {
     logger.error() << "activateStaging: updatePeer failed";
     emit stagingFailed();
     discardStaging();
     return false;
   }
 
-  m_stagingConfig = config;
   m_stagingHandshakeTimer.start(HANDSHAKE_POLL_MSEC);
   m_stagingTimeoutTimer.start(STAGING_HANDSHAKE_TIMEOUT_MSEC);
   return true;
@@ -581,22 +603,24 @@ bool Daemon::discardStaging() {
     if (m_excludedAddrSet.contains(addr)) delExclusionRoute(addr);
   }
 
-  if (!m_stagingWgutils) return true;
+  WireguardUtils* wg = m_tunnels.value(m_stagingConfig.m_ifname);
+  if (!wg) return true;
 
-  m_stagingWgutils->deleteInterface();
-  delete m_stagingWgutils;
-  m_stagingWgutils = nullptr;
+  wg->deleteInterface();
+  delete wg;
+  m_tunnels.remove(m_stagingConfig.m_ifname);
   m_stagingConfig = InterfaceConfig{};
   return true;
 }
 
 void Daemon::checkStagingHandshake() {
-  if (!m_stagingWgutils) {
+  WireguardUtils* wg = m_tunnels.value(m_stagingConfig.m_ifname);
+  if (!wg) {
     m_stagingHandshakeTimer.stop();
     return;
   }
 
-  for (const WireguardUtils::PeerStatus& peer : m_stagingWgutils->getPeerStatus()) {
+  for (const WireguardUtils::PeerStatus& peer : wg->getPeerStatus()) {
     if (peer.m_handshake != 0) {
       logger.debug() << "Staging tunnel handshake confirmed for" << peer.m_pubkey;
       m_stagingHandshakeTimer.stop();
@@ -610,7 +634,9 @@ void Daemon::checkStagingHandshake() {
 bool Daemon::promoteStagingToActive(const InterfaceConfig& newConfig) {
   logger.debug() << "promoteStagingToActive";
 
-  if (!m_stagingWgutils) {
+  const QString stagingIfname = m_stagingConfig.m_ifname;
+  WireguardUtils* staging = m_tunnels.value(stagingIfname);
+  if (!staging) {
     logger.error() << "promoteStagingToActive: no staging utils";
     return false;
   }
@@ -618,12 +644,16 @@ bool Daemon::promoteStagingToActive(const InterfaceConfig& newConfig) {
   m_stagingHandshakeTimer.stop();
   m_stagingTimeoutTimer.stop();
 
+  const QString oldIfname = m_primaryIfname;
+  WireguardUtils* oldWg = m_tunnels.value(oldIfname);
   if (!m_connections.isEmpty()) {
     const InterfaceConfig& oldConfig = m_connections.first().m_config;
-    for (const IPAddress& ip : oldConfig.m_allowedIPAddressRanges) {
-      wgutils()->deleteRoutePrefix(ip);
+    if (oldWg) {
+      for (const IPAddress& ip : oldConfig.m_allowedIPAddressRanges) {
+        oldWg->deleteRoutePrefix(ip);
+      }
+      oldWg->deletePeer(oldConfig);
     }
-    wgutils()->deletePeer(oldConfig);
 
     if (!oldConfig.m_serverIpv4AddrIn.isEmpty()) {
       IPAddress addr(oldConfig.m_serverIpv4AddrIn);
@@ -634,14 +664,18 @@ bool Daemon::promoteStagingToActive(const InterfaceConfig& newConfig) {
       if (m_excludedAddrSet.contains(addr)) delExclusionRoute(addr);
     }
   }
-  wgutils()->deleteInterface();
+  if (oldWg) {
+    oldWg->deleteInterface();
+    delete oldWg;
+    m_tunnels.remove(oldIfname);
+  }
+  m_connections.clear();
 
-  replaceActiveWgUtils(m_stagingWgutils);
-  m_stagingWgutils = nullptr;
+  m_primaryIfname = stagingIfname;
   m_stagingConfig = InterfaceConfig{};
 
   for (const IPAddress& ip : newConfig.m_allowedIPAddressRanges) {
-    if (!wgutils()->updateRoutePrefix(ip)) {
+    if (!staging->updateRoutePrefix(ip)) {
       logger.warning() << "promoteStagingToActive: route setup failed for" << ip.toString();
     }
   }
@@ -650,7 +684,7 @@ bool Daemon::promoteStagingToActive(const InterfaceConfig& newConfig) {
     logger.warning() << "promoteStagingToActive: DNS resolver update failed";
   }
 
-  m_connections[newConfig.m_hopType] = ConnectionState(newConfig);
+  m_connections[newConfig.m_ifname] = ConnectionState(newConfig);
   m_handshakeTimer.start(HANDSHAKE_POLL_MSEC);
 
   return true;

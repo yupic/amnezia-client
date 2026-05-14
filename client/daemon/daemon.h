@@ -17,6 +17,7 @@
 
 class Daemon : public QObject {
   Q_OBJECT
+  friend class IPUtilsMacos;
 
  public:
   enum Op {
@@ -75,11 +76,13 @@ class Daemon : public QObject {
     Q_UNUSED(config);
     return true;
   }
-  virtual WireguardUtils* wgutils() const = 0;
   virtual WireguardUtils* createWgUtils() = 0;
-  virtual void replaceActiveWgUtils(WireguardUtils* newUtils) = 0;
 
-  WireguardUtils* m_stagingWgutils = nullptr;
+  WireguardUtils* primaryWgutils() const { return m_tunnels.value(m_primaryIfname); }
+  WireguardUtils* wgutilsFor(const QString& ifname) const { return m_tunnels.value(ifname); }
+  QMap<QString, WireguardUtils*> m_tunnels;
+  QString m_primaryIfname;
+
   virtual bool supportIPUtils() const { return false; }
   virtual IPUtils* iputils() { return nullptr; }
   virtual DnsUtils* dnsutils() { return nullptr; }
@@ -96,7 +99,7 @@ class Daemon : public QObject {
     QDateTime m_date;
     InterfaceConfig m_config;
   };
-  QMap<InterfaceConfig::HopType, ConnectionState> m_connections;
+  QMap<QString, ConnectionState> m_connections;
   QHash<IPAddress, int> m_excludedAddrSet;
   QTimer m_handshakeTimer;
 };
