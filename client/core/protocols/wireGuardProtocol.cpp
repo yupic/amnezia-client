@@ -6,15 +6,19 @@
 
 #include "wireGuardProtocol.h"
 #include "core/utils/networkUtilities.h"
+#include "daemon/wireguardutils.h"
 
 #include "mozilla/localsocketcontroller.h"
 
 WireguardProtocol::WireguardProtocol(const QJsonObject &configuration, QObject *parent)
     : VpnProtocol(configuration, parent)
 {
-    m_impl.reset(new LocalSocketController());
+    const QString ifname = configuration.value("ifname").toString(WG_INTERFACE);
+    m_impl.reset(new LocalSocketController(ifname));
     connect(m_impl.get(), &ControllerImpl::connected, this,
-            [this](const QString &pubkey, const QDateTime &connectionTimestamp) {
+            [this](const QString& ifname, const QString &pubkey,
+                   const QDateTime &connectionTimestamp) {
+                Q_UNUSED(ifname)
                 setConnectionState(Vpn::ConnectionState::Connected);
             });
     connect(m_impl.get(), &ControllerImpl::statusUpdated, this,
@@ -40,7 +44,20 @@ WireguardProtocol::WireguardProtocol(const QJsonObject &configuration, QObject *
             });
 
     connect(m_impl.get(), &ControllerImpl::disconnected, this,
-            [this]() { setConnectionState(Vpn::ConnectionState::Disconnected); });
+            [this](const QString& ifname) {
+                Q_UNUSED(ifname)
+                setConnectionState(Vpn::ConnectionState::Disconnected);
+            });
+    connect(m_impl.get(), &ControllerImpl::stagingConnected, this,
+            [this](const QString& ifname, const QString& pubkey) {
+                Q_UNUSED(ifname)
+                emit stagingConnected(pubkey);
+            });
+    connect(m_impl.get(), &ControllerImpl::stagingFailed, this,
+            [this](const QString& ifname) {
+                Q_UNUSED(ifname)
+                emit stagingFailed();
+            });
     m_impl->initialize(nullptr, nullptr);
 }
 
@@ -77,10 +94,6 @@ ErrorCode WireguardProtocol::stopMzImpl()
 
 void WireguardProtocol::activateStaging(const QJsonObject& config, const QString& stagingIfname)
 {
-    connect(m_impl.get(), &ControllerImpl::stagingConnected,
-            this, &WireguardProtocol::stagingConnected, Qt::UniqueConnection);
-    connect(m_impl.get(), &ControllerImpl::stagingFailed,
-            this, &WireguardProtocol::stagingFailed, Qt::UniqueConnection);
     m_impl->activateStaging(config, stagingIfname);
 }
 

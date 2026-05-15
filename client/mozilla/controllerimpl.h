@@ -44,6 +44,8 @@ class ControllerImpl : public QObject {
   // "disconnecting" state until the "disconnected" signal is received.
   virtual void deactivate() = 0;
 
+  virtual void setPrimary(const QJsonObject& config) { Q_UNUSED(config) }
+
   // This method is used to retrieve the VPN tunnel status (mainly the number
   // of bytes sent and received). It's called always when the VPN tunnel is
   // active.
@@ -76,12 +78,12 @@ class ControllerImpl : public QObject {
                    const QDateTime& connectionDate);
 
   // These 2 signals can be dispatched at any time.
-  void connected(const QString& pubkey,
+  void connected(const QString& ifname, const QString& pubkey,
                  const QDateTime& connectionTimestamp = QDateTime());
-  void disconnected();
+  void disconnected(const QString& ifname);
 
-  void stagingConnected(const QString& pubkey);
-  void stagingFailed();
+  void stagingConnected(const QString& ifname, const QString& pubkey);
+  void stagingFailed(const QString& ifname);
 
   // This method should be emitted after a checkStatus() call.
   // "serverIpv4Gateway" is the current VPN tunnel gateway.

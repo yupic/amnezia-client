@@ -181,6 +181,19 @@ void DaemonLocalServerConnection::parseCommand(const QByteArray& data) {
     return;
   }
 
+  if (type == "setPrimary") {
+    InterfaceConfig config;
+    if (!Daemon::parseConfig(obj, config)) {
+      logger.error() << "setPrimary: invalid configuration";
+      return;
+    }
+    if (!Daemon::instance()->setPrimary(config.m_ifname, config)) {
+      logger.error() << "setPrimary failed";
+      Daemon::instance()->deactivateTunnel(config.m_ifname);
+    }
+    return;
+  }
+
   if (type == "status") {
     QJsonObject obj = Daemon::instance()->getStatus();
     obj.insert("type", "status");
@@ -213,6 +226,7 @@ void DaemonLocalServerConnection::onTunnelConnected(const QString& ifname,
   QJsonObject obj;
   obj.insert("type", style == ResponseStyle::LegacyStaging ? "stagingConnected"
                                                            : "connected");
+  obj.insert("ifname", ifname);
   obj.insert("pubkey", pubkey);
   write(obj);
 }
@@ -225,6 +239,7 @@ void DaemonLocalServerConnection::onTunnelHandshakeFailed(const QString& ifname)
   QJsonObject obj;
   obj.insert("type", style == ResponseStyle::LegacyStaging ? "stagingFailed"
                                                            : "disconnected");
+  obj.insert("ifname", ifname);
   write(obj);
 }
 

@@ -23,7 +23,6 @@
 #include "leakdetector.h"
 #include "logger.h"
 #include "daemon/daemonerrors.h"
-#include "daemon/wireguardutils.h"
 
 #include "core/utils/protocolEnum.h"
 #include "core/protocols/protocolUtils.h"
@@ -40,7 +39,8 @@ namespace {
 Logger logger("LocalSocketController");
 }
 
-LocalSocketController::LocalSocketController() {
+LocalSocketController::LocalSocketController(const QString& ifname)
+    : m_ifname(ifname) {
   MZ_COUNT_CTOR(LocalSocketController);
 
   m_socket = new QLocalSocket(this);
@@ -85,7 +85,7 @@ void LocalSocketController::disconnectInternal() {
   m_daemonState = eReady;
   m_initializingRetry = 0;
   m_initializingTimer.stop();
-  emit disconnected();
+  emit disconnected(m_ifname);
 }
 
 void LocalSocketController::initialize(const Device* device, const Keys* keys) {
@@ -298,8 +298,14 @@ QJsonObject LocalSocketController::buildActivateJson(const QJsonObject& rawConfi
 }
 
 void LocalSocketController::activate(const QJsonObject& rawConfig) {
-  QJsonObject json = buildActivateJson(rawConfig, WG_INTERFACE);
+  QJsonObject json = buildActivateJson(rawConfig, m_ifname);
   json.insert("type", "activate");
+  write(json);
+}
+
+void LocalSocketController::setPrimary(const QJsonObject& rawConfig) {
+  QJsonObject json = buildActivateJson(rawConfig, m_ifname);
+  json.insert("type", "setPrimary");
   write(json);
 }
 
@@ -326,14 +332,15 @@ void LocalSocketController::deactivate() {
 
   if (m_daemonState != eReady) {
     logger.debug() << "No disconnect, controller is not ready";
-    emit disconnected();
+    emit disconnected(m_ifname);
     return;
   }
 
   QJsonObject json;
   json.insert("type", "deactivate");
+  json.insert("ifname", m_ifname);
   write(json);
-  emit disconnected();
+  emit disconnected(m_ifname);
 }
 
 void LocalSocketController::checkStatus() {
@@ -516,18 +523,22 @@ void LocalSocketController::parseCommand(const QByteArray& command) {
 
     emit statusUpdated("", m_deviceIpv4, 0, 0);
 
-    emit connected(pubkey.toString());
+    const QString msgIfname = obj.value("ifname").toString(m_ifname);
+    emit connected(msgIfname, pubkey.toString());
     return;
   }
 
   if (type == "stagingConnected") {
     QJsonValue pubkey = obj.value("pubkey");
-    emit stagingConnected(pubkey.isString() ? pubkey.toString() : QString());
+    const QString msgIfname = obj.value("ifname").toString();
+    emit stagingConnected(msgIfname,
+                          pubkey.isString() ? pubkey.toString() : QString());
     return;
   }
 
   if (type == "stagingFailed") {
-    emit stagingFailed();
+    const QString msgIfname = obj.value("ifname").toString();
+    emit stagingFailed(msgIfname);
     return;
   }
 

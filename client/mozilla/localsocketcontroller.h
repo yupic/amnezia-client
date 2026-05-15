@@ -19,7 +19,7 @@ class LocalSocketController final : public ControllerImpl {
   Q_DISABLE_COPY_MOVE(LocalSocketController)
 
  public:
-  LocalSocketController();
+  explicit LocalSocketController(const QString& ifname);
   ~LocalSocketController();
 
   void initialize(const Device* device, const Keys* keys) override;
@@ -27,6 +27,8 @@ class LocalSocketController final : public ControllerImpl {
   void activate(const QJsonObject& rawConfig) override;
 
   void deactivate() override;
+
+  void setPrimary(const QJsonObject& rawConfig) override;
 
   void activateStaging(const QJsonObject& rawConfig, const QString& stagingIfname) override;
   void discardStaging() override;
@@ -66,6 +68,7 @@ class LocalSocketController final : public ControllerImpl {
 
   QByteArray m_buffer;
 
+  QString m_ifname;
   QString m_deviceIpv4;
   std::function<void(const QString&)> m_logCallback = nullptr;
 
