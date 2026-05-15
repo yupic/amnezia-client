@@ -17,7 +17,6 @@
 
 constexpr const char* JSON_ALLOWEDIPADDRESSRANGES = "allowedIPAddressRanges";
 constexpr int HANDSHAKE_POLL_MSEC = 250;
-constexpr int ACTIVATION_TIMEOUT_MSEC = 30000;
 
 namespace {
 
