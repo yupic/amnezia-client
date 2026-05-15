@@ -6,14 +6,13 @@
 
 #include "wireGuardProtocol.h"
 #include "core/utils/networkUtilities.h"
-#include "daemon/wireguardutils.h"
 
 #include "mozilla/localsocketcontroller.h"
 
 WireguardProtocol::WireguardProtocol(const QJsonObject &configuration, QObject *parent)
     : VpnProtocol(configuration, parent)
 {
-    const QString ifname = configuration.value("ifname").toString(WG_INTERFACE);
+    const QString ifname = configuration.value("ifname").toString();
     m_impl.reset(new LocalSocketController(ifname));
     connect(m_impl.get(), &ControllerImpl::connected, this,
             [this](const QString& ifname, const QString &pubkey,
@@ -48,16 +47,6 @@ WireguardProtocol::WireguardProtocol(const QJsonObject &configuration, QObject *
                 Q_UNUSED(ifname)
                 setConnectionState(Vpn::ConnectionState::Disconnected);
             });
-    connect(m_impl.get(), &ControllerImpl::stagingConnected, this,
-            [this](const QString& ifname, const QString& pubkey) {
-                Q_UNUSED(ifname)
-                emit stagingConnected(pubkey);
-            });
-    connect(m_impl.get(), &ControllerImpl::stagingFailed, this,
-            [this](const QString& ifname) {
-                Q_UNUSED(ifname)
-                emit stagingFailed();
-            });
     connect(m_impl.get(), &ControllerImpl::primaryReady, this,
             [this](const QString& ifname) {
                 Q_UNUSED(ifname)
@@ -72,14 +61,7 @@ WireguardProtocol::~WireguardProtocol()
     QThread::msleep(200);
 }
 
-void WireguardProtocol::stop()
-{
-    if (m_stopped) return;
-    m_stopped = true;
-    stopMzImpl();
-}
-
-ErrorCode WireguardProtocol::startMzImpl()
+ErrorCode WireguardProtocol::start()
 {
     QString protocolName = m_rawConfig.value("protocol").toString();
     QJsonObject vpnConfigData = m_rawConfig.value(protocolName + "_config_data").toObject();
@@ -92,44 +74,14 @@ ErrorCode WireguardProtocol::startMzImpl()
     return ErrorCode::NoError;
 }
 
-ErrorCode WireguardProtocol::stopMzImpl()
+void WireguardProtocol::stop()
 {
-    if (m_abandoned) return ErrorCode::NoError;
+    if (m_stopped) return;
+    m_stopped = true;
     m_impl->deactivate();
-    return ErrorCode::NoError;
 }
 
 void WireguardProtocol::setPrimary(const QJsonObject& config)
 {
     m_impl->setPrimary(config);
-}
-
-void WireguardProtocol::activateStaging(const QJsonObject& config, const QString& stagingIfname)
-{
-    m_impl->activateStaging(config, stagingIfname);
-}
-
-void WireguardProtocol::discardStaging()
-{
-    m_impl->discardStaging();
-}
-
-void WireguardProtocol::promoteStagingToActive(const QJsonObject& config, const QString& stagingIfname)
-{
-    m_impl->promoteStagingToActive(config, stagingIfname);
-}
-
-void WireguardProtocol::abandon()
-{
-    m_abandoned = true;
-}
-
-void WireguardProtocol::assumeConnected()
-{
-    setConnectionState(Vpn::ConnectionState::Connected);
-}
-
-ErrorCode WireguardProtocol::start()
-{
-    return startMzImpl();
 }

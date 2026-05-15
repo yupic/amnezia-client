@@ -62,7 +62,7 @@ bool WireguardUtilsLinux::addInterface(const InterfaceConfig& config) {
         return false;
     }
 
-    const QString ifname = config.m_ifname.isEmpty() ? QString(WG_INTERFACE) : config.m_ifname;
+    const QString ifname = config.m_ifname;
 
     QDir wgRuntimeDir(WG_RUNTIME_DIR);
     if (!wgRuntimeDir.exists()) {

@@ -30,10 +30,6 @@ class LocalSocketController final : public ControllerImpl {
 
   void setPrimary(const QJsonObject& rawConfig) override;
 
-  void activateStaging(const QJsonObject& rawConfig, const QString& stagingIfname) override;
-  void discardStaging() override;
-  void promoteStagingToActive(const QJsonObject& rawConfig, const QString& stagingIfname) override;
-
   void checkStatus() override;
 
   void getBackendLogs(std::function<void(const QString&)>&& callback) override;

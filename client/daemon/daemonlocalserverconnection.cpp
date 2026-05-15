@@ -112,11 +112,9 @@ void DaemonLocalServerConnection::parseCommand(const QByteArray& data) {
       disconnected();
       return;
     }
-    m_responseStyle[config.m_ifname] = ResponseStyle::LegacyActive;
     if (!Daemon::instance()->activate(config.m_ifname, config)) {
       logger.error() << "Failed to activate the interface";
       Daemon::instance()->deactivateTunnel(config.m_ifname);
-      m_responseStyle.remove(config.m_ifname);
       disconnected();
     }
     return;
@@ -126,62 +124,8 @@ void DaemonLocalServerConnection::parseCommand(const QByteArray& data) {
     const QString ifname = obj.value("ifname").toString();
     if (!ifname.isEmpty()) {
       Daemon::instance()->deactivateTunnel(ifname);
-      m_responseStyle.remove(ifname);
     } else {
-      m_responseStyle.clear();
       Daemon::instance()->deactivate(true);
-    }
-    return;
-  }
-
-  if (type == "activateStaging") {
-    InterfaceConfig config;
-    if (!Daemon::parseConfig(obj, config)) {
-      logger.error() << "activateStaging: invalid configuration";
-      return;
-    }
-    m_responseStyle[config.m_ifname] = ResponseStyle::LegacyStaging;
-    if (!Daemon::instance()->activate(config.m_ifname, config)) {
-      logger.error() << "activateStaging: failed";
-      Daemon::instance()->deactivateTunnel(config.m_ifname);
-      m_responseStyle.remove(config.m_ifname);
-      QJsonObject reply;
-      reply.insert("type", "stagingFailed");
-      write(reply);
-    }
-    return;
-  }
-
-  if (type == "discardStaging") {
-    QString stagingIfname;
-    for (auto it = m_responseStyle.constBegin(); it != m_responseStyle.constEnd(); ++it) {
-      if (it.value() == ResponseStyle::LegacyStaging) {
-        stagingIfname = it.key();
-        break;
-      }
-    }
-    if (!stagingIfname.isEmpty()) {
-      Daemon::instance()->deactivateTunnel(stagingIfname);
-      m_responseStyle.remove(stagingIfname);
-    }
-    return;
-  }
-
-  if (type == "promoteStagingToActive") {
-    InterfaceConfig config;
-    if (!Daemon::parseConfig(obj, config)) {
-      logger.error() << "promoteStagingToActive: invalid configuration";
-      return;
-    }
-    // TODO: Order is broken here, new tunnel should be set primary before deactivating the old one.
-    const QString oldPrimary = Daemon::instance()->primaryIfname();
-    if (!oldPrimary.isEmpty() && oldPrimary != config.m_ifname) {
-      Daemon::instance()->deactivateTunnel(oldPrimary);
-      m_responseStyle.remove(oldPrimary);
-    }
-    if (!Daemon::instance()->setPrimary(config.m_ifname, config)) {
-      logger.error() << "promoteStagingToActive failed";
-      Daemon::instance()->deactivateTunnel(config.m_ifname);
     }
     return;
   }
@@ -229,26 +173,16 @@ void DaemonLocalServerConnection::parseCommand(const QByteArray& data) {
 
 void DaemonLocalServerConnection::onTunnelConnected(const QString& ifname,
                                                     const QString& pubkey) {
-  const ResponseStyle style =
-      m_responseStyle.value(ifname, ResponseStyle::LegacyActive);
-  m_responseStyle.remove(ifname);
-
   QJsonObject obj;
-  obj.insert("type", style == ResponseStyle::LegacyStaging ? "stagingConnected"
-                                                           : "connected");
+  obj.insert("type", "connected");
   obj.insert("ifname", ifname);
   obj.insert("pubkey", pubkey);
   write(obj);
 }
 
 void DaemonLocalServerConnection::onTunnelHandshakeFailed(const QString& ifname) {
-  const ResponseStyle style =
-      m_responseStyle.value(ifname, ResponseStyle::LegacyActive);
-  m_responseStyle.remove(ifname);
-
   QJsonObject obj;
-  obj.insert("type", style == ResponseStyle::LegacyStaging ? "stagingFailed"
-                                                           : "disconnected");
+  obj.insert("type", "disconnected");
   obj.insert("ifname", ifname);
   write(obj);
 }

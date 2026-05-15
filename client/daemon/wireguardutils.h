@@ -14,9 +14,6 @@
 
 #include "interfaceconfig.h"
 
-constexpr const char* WG_INTERFACE = "amn0";
-constexpr const char* WG_STAGING_INTERFACE = "amn1";
-
 constexpr uint16_t WG_KEEPALIVE_PERIOD = 60;
 
 class WireguardUtils : public QObject {
@@ -36,7 +33,7 @@ class WireguardUtils : public QObject {
   virtual ~WireguardUtils() = default;
 
   virtual bool interfaceExists() = 0;
-  virtual QString interfaceName() { return WG_INTERFACE; }
+  virtual QString interfaceName() = 0;
   virtual bool addInterface(const InterfaceConfig& config) = 0;
   virtual bool deleteInterface() = 0;
 

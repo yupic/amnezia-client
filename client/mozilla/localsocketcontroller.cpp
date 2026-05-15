@@ -309,24 +309,6 @@ void LocalSocketController::setPrimary(const QJsonObject& rawConfig) {
   write(json);
 }
 
-void LocalSocketController::activateStaging(const QJsonObject& rawConfig, const QString& stagingIfname) {
-  QJsonObject json = buildActivateJson(rawConfig, stagingIfname);
-  json.insert("type", "activateStaging");
-  write(json);
-}
-
-void LocalSocketController::discardStaging() {
-  QJsonObject json;
-  json.insert("type", "discardStaging");
-  write(json);
-}
-
-void LocalSocketController::promoteStagingToActive(const QJsonObject& rawConfig, const QString& stagingIfname) {
-  QJsonObject json = buildActivateJson(rawConfig, stagingIfname);
-  json.insert("type", "promoteStagingToActive");
-  write(json);
-}
-
 void LocalSocketController::deactivate() {
   logger.debug() << "Deactivating";
 
@@ -525,20 +507,6 @@ void LocalSocketController::parseCommand(const QByteArray& command) {
 
     const QString msgIfname = obj.value("ifname").toString(m_ifname);
     emit connected(msgIfname, pubkey.toString());
-    return;
-  }
-
-  if (type == "stagingConnected") {
-    QJsonValue pubkey = obj.value("pubkey");
-    const QString msgIfname = obj.value("ifname").toString();
-    emit stagingConnected(msgIfname,
-                          pubkey.isString() ? pubkey.toString() : QString());
-    return;
-  }
-
-  if (type == "stagingFailed") {
-    const QString msgIfname = obj.value("ifname").toString();
-    emit stagingFailed(msgIfname);
     return;
   }
 
