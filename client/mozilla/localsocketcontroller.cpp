@@ -542,6 +542,12 @@ void LocalSocketController::parseCommand(const QByteArray& command) {
     return;
   }
 
+  if (type == "primaryReady") {
+    const QString msgIfname = obj.value("ifname").toString(m_ifname);
+    emit primaryReady(msgIfname);
+    return;
+  }
+
   if (type == "backendFailure") {
     if (!obj.contains("errorCode")) {
       // report a generic error if we dont know what it is.

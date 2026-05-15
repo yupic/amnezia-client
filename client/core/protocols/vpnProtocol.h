@@ -61,6 +61,7 @@ public:
     virtual bool isDisconnected() const;
     virtual ErrorCode start() = 0;
     virtual void stop() = 0;
+    virtual void setPrimary(const QJsonObject& config) { Q_UNUSED(config) }
 
     Vpn::ConnectionState connectionState() const;
     ErrorCode lastError() const;
@@ -88,6 +89,7 @@ signals:
     void tunnelAddressesUpdated(const QString& gateway, const QString& localAddress);
     void stagingConnected(const QString& pubkey);
     void stagingFailed();
+    void primaryReady();
 
 public slots:
     virtual void onTimeout(); // todo: remove?

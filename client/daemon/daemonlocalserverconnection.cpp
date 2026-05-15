@@ -113,8 +113,7 @@ void DaemonLocalServerConnection::parseCommand(const QByteArray& data) {
       return;
     }
     m_responseStyle[config.m_ifname] = ResponseStyle::LegacyActive;
-    if (!Daemon::instance()->activate(config.m_ifname, config) ||
-        !Daemon::instance()->setPrimary(config.m_ifname, config)) {
+    if (!Daemon::instance()->activate(config.m_ifname, config)) {
       logger.error() << "Failed to activate the interface";
       Daemon::instance()->deactivateTunnel(config.m_ifname);
       m_responseStyle.remove(config.m_ifname);
@@ -124,8 +123,14 @@ void DaemonLocalServerConnection::parseCommand(const QByteArray& data) {
   }
 
   if (type == "deactivate") {
-    m_responseStyle.clear();
-    Daemon::instance()->deactivate(true);
+    const QString ifname = obj.value("ifname").toString();
+    if (!ifname.isEmpty()) {
+      Daemon::instance()->deactivateTunnel(ifname);
+      m_responseStyle.remove(ifname);
+    } else {
+      m_responseStyle.clear();
+      Daemon::instance()->deactivate(true);
+    }
     return;
   }
 
@@ -190,7 +195,12 @@ void DaemonLocalServerConnection::parseCommand(const QByteArray& data) {
     if (!Daemon::instance()->setPrimary(config.m_ifname, config)) {
       logger.error() << "setPrimary failed";
       Daemon::instance()->deactivateTunnel(config.m_ifname);
+      return;
     }
+    QJsonObject reply;
+    reply.insert("type", "primaryReady");
+    reply.insert("ifname", config.m_ifname);
+    write(reply);
     return;
   }
 

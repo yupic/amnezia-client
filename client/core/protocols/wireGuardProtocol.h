@@ -21,6 +21,7 @@ public:
 
     ErrorCode start() override;
     void stop() override;
+    void setPrimary(const QJsonObject& config) override;
 
     void activateStaging(const QJsonObject& config, const QString& stagingIfname) override;
     void discardStaging() override;
@@ -33,6 +34,7 @@ public:
 
 private:
     bool m_abandoned = false;
+    bool m_stopped = false;
 
     QScopedPointer<ControllerImpl> m_impl;
 };

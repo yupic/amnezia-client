@@ -3,6 +3,7 @@
 
 #include <QObject>
 #include <QMetaObject>
+#include <QSet>
 #include <QString>
 #include <QScopedPointer>
 #include <QRemoteObjectNode>
@@ -16,7 +17,7 @@
 #include "core/repositories/secureAppSettingsRepository.h"
 
 #include "core/vpnTrafficGuard.h"
-#include "core/tunnelSession.h"
+#include "core/tunnel.h"
 
 #ifdef Q_OS_ANDROID
 #include "core/protocols/androidVpnProtocol.h"
@@ -39,10 +40,7 @@ public:
 
     QSharedPointer<VpnProtocol> vpnProtocol() const;
 
-    const QString &remoteAddress() const {
-        static const QString empty;
-        return m_active ? m_active->remoteAddress() : empty;
-    }
+    const QString &remoteAddress() const { return m_remoteAddress; }
 
 #ifdef Q_OS_ANDROID
     void restoreConnection();
@@ -79,10 +77,13 @@ private:
     SecureAppSettingsRepository* m_appSettingsRepository;
     QScopedPointer<VpnTrafficGuard> m_trafficGuard;
 
+    QJsonObject m_vpnConfiguration;
+    QString m_remoteAddress;
     QJsonObject m_routeMode;
 
-    TunnelSession* m_active = nullptr;
-    TunnelSession* m_staging = nullptr;
+    Tunnel* m_active = nullptr;
+    Tunnel* m_staging = nullptr;
+    QSet<QString> m_ifnamesInUse;
 
     // Only for iOS for now, check counters
     QTimer m_checkTimer;
@@ -97,15 +98,22 @@ private:
    Vpn::ConnectionState m_connectionState;
 
    void createProtocolConnections();
+   void wireTunnelSignals(Tunnel* tunnel, bool isActive);
+
+   QString allocateIfname();
+   void releaseIfname(const QString& ifname);
 
    void appendSplitTunnelingConfig(QJsonObject &config);
    void appendKillSwitchConfig(QJsonObject &config);
 
-   void startStagingSwitch(DockerContainer container, const QJsonObject &vpnConfiguration);
+   void startTunnelSwitch(DockerContainer container,
+                          const QJsonObject &vpnConfiguration,
+                          const QString &resolvedRemote);
 
 private slots:
-   void onStagingHandshakeConfirmed(const QString &pubkey);
-   void onStagingFailed();
+   void onTunnelPrepared();
+   void onTunnelActivated();
+   void onTunnelFailed(amnezia::ErrorCode error);
 };
 
 #endif // VPNCONNECTION_H

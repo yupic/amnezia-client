@@ -85,6 +85,8 @@ class ControllerImpl : public QObject {
   void stagingConnected(const QString& ifname, const QString& pubkey);
   void stagingFailed(const QString& ifname);
 
+  void primaryReady(const QString& ifname);
+
   // This method should be emitted after a checkStatus() call.
   // "serverIpv4Gateway" is the current VPN tunnel gateway.
   // "deviceIpv4Address" is the address of the VPN client.

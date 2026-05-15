@@ -24,6 +24,7 @@ void Tunnel::prepare() {
 
     setState(State::Preparing);
 
+    m_config.insert("ifname", m_ifname);
     m_protocol.reset(VpnProtocol::factory(m_container, m_config));
     if (!m_protocol) {
         setState(State::Failed);
@@ -37,6 +38,8 @@ void Tunnel::prepare() {
             this, &Tunnel::bytesChanged);
     connect(m_protocol.data(), &VpnProtocol::tunnelAddressesUpdated,
             this, &Tunnel::addressesUpdated);
+    connect(m_protocol.data(), &VpnProtocol::primaryReady,
+            this, &Tunnel::onPrimaryReady);
 
     startActivationDeadline(ACTIVATION_TIMEOUT_MSEC);
 
@@ -53,6 +56,15 @@ void Tunnel::commit() {
         return;
     }
     setState(State::Committing);
+    if (m_protocol) {
+        m_protocol->setPrimary(m_config);
+    }
+}
+
+void Tunnel::onPrimaryReady() {
+    if (m_state != State::Committing) {
+        return;
+    }
     setState(State::Active);
     emit activated();
 }

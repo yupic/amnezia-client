@@ -58,6 +58,11 @@ WireguardProtocol::WireguardProtocol(const QJsonObject &configuration, QObject *
                 Q_UNUSED(ifname)
                 emit stagingFailed();
             });
+    connect(m_impl.get(), &ControllerImpl::primaryReady, this,
+            [this](const QString& ifname) {
+                Q_UNUSED(ifname)
+                emit primaryReady();
+            });
     m_impl->initialize(nullptr, nullptr);
 }
 
@@ -69,8 +74,9 @@ WireguardProtocol::~WireguardProtocol()
 
 void WireguardProtocol::stop()
 {
+    if (m_stopped) return;
+    m_stopped = true;
     stopMzImpl();
-    return;
 }
 
 ErrorCode WireguardProtocol::startMzImpl()
@@ -81,6 +87,7 @@ ErrorCode WireguardProtocol::startMzImpl()
     m_rawConfig.insert(protocolName + "_config_data", vpnConfigData);
     m_rawConfig[configKey::hostName] = NetworkUtilities::getIPAddress(m_rawConfig[configKey::hostName].toString());
 
+    m_stopped = false;
     m_impl->activate(m_rawConfig);
     return ErrorCode::NoError;
 }
@@ -90,6 +97,11 @@ ErrorCode WireguardProtocol::stopMzImpl()
     if (m_abandoned) return ErrorCode::NoError;
     m_impl->deactivate();
     return ErrorCode::NoError;
+}
+
+void WireguardProtocol::setPrimary(const QJsonObject& config)
+{
+    m_impl->setPrimary(config);
 }
 
 void WireguardProtocol::activateStaging(const QJsonObject& config, const QString& stagingIfname)
