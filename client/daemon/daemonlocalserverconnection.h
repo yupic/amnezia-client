@@ -5,7 +5,9 @@
 #ifndef DAEMONLOCALSERVERCONNECTION_H
 #define DAEMONLOCALSERVERCONNECTION_H
 
+#include <QMap>
 #include <QObject>
+#include <QString>
 
 #include "daemonerrors.h"
 
@@ -23,11 +25,12 @@ class DaemonLocalServerConnection final : public QObject {
 
   void parseCommand(const QByteArray& json);
 
-  void connected(const QString& pubkey);
+  enum class ResponseStyle { LegacyActive, LegacyStaging };
+
+  void onTunnelConnected(const QString& ifname, const QString& pubkey);
+  void onTunnelHandshakeFailed(const QString& ifname);
   void disconnected();
   void backendFailure(DaemonError err);
-  void stagingConnected(const QString& pubkey);
-  void stagingFailed();
 
   void write(const QJsonObject& obj);
 
@@ -35,6 +38,8 @@ class DaemonLocalServerConnection final : public QObject {
   QLocalSocket* m_socket = nullptr;
 
   QByteArray m_buffer;
+
+  QMap<QString, ResponseStyle> m_responseStyle;
 };
 
 #endif  // DAEMONLOCALSERVERCONNECTION_H

@@ -32,9 +32,13 @@ class Daemon : public QObject {
 
   static bool parseConfig(const QJsonObject& obj, InterfaceConfig& config);
 
-  virtual bool activate(const InterfaceConfig& config);
+  bool activate(const QString& ifname, const InterfaceConfig& config);
+  bool setPrimary(const QString& ifname, const InterfaceConfig& config);
+  bool deactivateTunnel(const QString& ifname);
   virtual bool deactivate(bool emitSignals = true);
   virtual QJsonObject getStatus();
+
+  const QString& primaryIfname() const { return m_primaryIfname; }
 
   // Callback before any Activating measure is done
   virtual void prepareActivation(const InterfaceConfig& config, int inetAdapterIndex = 0) {
@@ -45,12 +49,9 @@ class Daemon : public QObject {
   QString logs();
   void cleanLogs();
 
-  bool activateStaging(const InterfaceConfig& config);
-  bool discardStaging();
-  bool promoteStagingToActive(const InterfaceConfig& newConfig);
-
  signals:
-  void connected(const QString& pubkey);
+  void tunnelConnected(const QString& ifname, const QString& pubkey);
+  void tunnelHandshakeFailed(const QString& ifname);
   /**
    * Can be fired if a call to activate() was unsucessfull
    * and connected systems should rollback
@@ -58,17 +59,13 @@ class Daemon : public QObject {
   void activationFailure();
   void disconnected();
   void backendFailure(DaemonError reason = DaemonError::ERROR_FATAL);
-  void stagingConnected(const QString& pubkey);
-  void stagingFailed();
 
  private:
   bool maybeUpdateResolvers(const InterfaceConfig& config);
   bool addExclusionRoute(const IPAddress& address);
   bool delExclusionRoute(const IPAddress& address);
-  void checkStagingHandshake();
-  QTimer m_stagingHandshakeTimer;
-  QTimer m_stagingTimeoutTimer;
-  InterfaceConfig m_stagingConfig;
+  void checkActivations();
+  QTimer m_activationTimer;
 
  protected:
   virtual bool run(Op op, const InterfaceConfig& config) {
@@ -90,18 +87,16 @@ class Daemon : public QObject {
   static bool parseStringList(const QJsonObject& obj, const QString& name,
                               QStringList& list);
 
-  void checkHandshake();
-
   class ConnectionState {
    public:
     ConnectionState(){};
     ConnectionState(const InterfaceConfig& config) { m_config = config; }
     QDateTime m_date;
+    QDateTime m_deadline;
     InterfaceConfig m_config;
   };
   QMap<QString, ConnectionState> m_connections;
   QHash<IPAddress, int> m_excludedAddrSet;
-  QTimer m_handshakeTimer;
 };
 
 #endif  // DAEMON_H
