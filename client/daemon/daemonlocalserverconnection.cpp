@@ -114,7 +114,6 @@ void DaemonLocalServerConnection::parseCommand(const QByteArray& data) {
     }
     if (!Daemon::instance()->activate(config.m_ifname, config)) {
       logger.error() << "Failed to activate the interface";
-      Daemon::instance()->deactivateTunnel(config.m_ifname);
       disconnected();
     }
     return;
