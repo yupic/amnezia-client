@@ -447,16 +447,7 @@ void VpnConnection::reconnectToVpn() {
 
 #ifdef AMNEZIA_DESKTOP
     if (m_active) {
-        const QString ifname = m_active->ifname();
-        const DockerContainer container = m_active->container();
-        const QJsonObject config = m_active->config();
-        const QString remoteAddress = m_active->remoteAddress();
-
-        m_active->deactivate();
-        delete m_active;
-        m_active = new Tunnel(ifname, container, config, remoteAddress, this);
-        wireTunnelSignals(m_active, /*isActive=*/true);
-        m_active->prepare();
+        m_active->restart();
         return;
     }
 #endif

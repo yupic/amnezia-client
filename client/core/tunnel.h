@@ -45,6 +45,7 @@ public:
     virtual void prepare();
     virtual void commit();
     virtual void deactivate();
+    virtual void restart();
 
 signals:
     void prepared();

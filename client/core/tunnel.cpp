@@ -94,6 +94,12 @@ void Tunnel::deactivate() {
     setState(State::Gone);
 }
 
+void Tunnel::restart() {
+    deactivate();
+    setState(State::Idle);
+    prepare();
+}
+
 void Tunnel::setState(State next) {
     if (m_state == next) {
         return;
