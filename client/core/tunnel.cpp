@@ -130,7 +130,14 @@ void Tunnel::onProtocolStateChanged(Vpn::ConnectionState state) {
         emit prepared();
         return;
     }
-    if (m_state == State::Preparing && state == Vpn::ConnectionState::Error) {
+
+    const bool inLiveState = m_state == State::Preparing
+                          || m_state == State::Prepared
+                          || m_state == State::Committing
+                          || m_state == State::Active;
+    const bool isFailureSignal = state == Vpn::ConnectionState::Disconnected
+                              || state == Vpn::ConnectionState::Error;
+    if (inLiveState && isFailureSignal) {
         cancelActivationDeadline();
         setState(State::Failed);
         emit failed(m_protocol ? m_protocol->lastError() : amnezia::ErrorCode::InternalError);
