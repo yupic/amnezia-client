@@ -486,12 +486,20 @@ void LocalSocketController::parseCommand(const QByteArray& command) {
     return;
   }
 
+  auto belongsToThisTunnel = [this, &obj]() {
+    const QJsonValue val = obj.value("ifname");
+    return !val.isString() || val.toString() == m_ifname;
+  };
+
   if (type == "disconnected") {
+    if (!belongsToThisTunnel()) return;
     disconnectInternal();
     return;
   }
 
   if (type == "connected") {
+    if (!belongsToThisTunnel()) return;
+
     QJsonValue pubkey = obj.value("pubkey");
     if (!pubkey.isString()) {
       logger.error() << "Unexpected pubkey value";
@@ -511,12 +519,14 @@ void LocalSocketController::parseCommand(const QByteArray& command) {
   }
 
   if (type == "primaryReady") {
+    if (!belongsToThisTunnel()) return;
     const QString msgIfname = obj.value("ifname").toString(m_ifname);
     emit primaryReady(msgIfname);
     return;
   }
 
   if (type == "primaryFailed") {
+    if (!belongsToThisTunnel()) return;
     const QString msgIfname = obj.value("ifname").toString(m_ifname);
     emit primaryFailed(msgIfname);
     return;
