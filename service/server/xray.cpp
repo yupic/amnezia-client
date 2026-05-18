@@ -29,48 +29,54 @@
 
 bool Xray::startXray(const QString &cfg)
 {
-    qDebug() << "Xray::startXray()";
+    qDebug() << "VPN connect [VLESS]: service received Xray start request";
 
     auto defaultIface = NetworkUtilities::getGatewayAndIface().second;
 #ifdef Q_OS_LINUX
     m_defaultIfaceName = defaultIface.name().toUtf8();
+    qDebug() << "VPN connect [VLESS]: binding Xray sockets to default interface" << m_defaultIfaceName;
 #else
     m_defaultIfaceIdx = defaultIface.index();
+    qDebug() << "VPN connect [VLESS]: binding Xray sockets to default interface index" << m_defaultIfaceIdx;
 #endif
 
     if (auto err = amnezia_xray_setsockcallback(ctxSockCallback, this); err != nullptr) {
-        qDebug() << "[xray] sockopt failed: " << err;
+        qCritical() << "VPN connect [VLESS]: failed to install Xray socket callback:" << err;
         amnezia_xray_free(err);
         return false;
     }
+    qDebug() << "VPN connect [VLESS]: Xray socket callback installed";
 
     amnezia_xray_setloghandler(ctxLogHandler, this);
 
     QByteArray bytes = cfg.toUtf8();
     if (auto err = amnezia_xray_configure(bytes.data()); err != nullptr) {
-        qDebug() << "[xray] configuration failed: " << err;
+        qCritical() << "VPN connect [VLESS]: Xray configuration failed:" << err;
         amnezia_xray_free(err);
         return false;
     }
+    qDebug() << "VPN connect [VLESS]: Xray configuration accepted";
 
     if (auto err = amnezia_xray_start(); err != nullptr) {
-        qDebug() << "[xray] failed to start: " << err;
+        qCritical() << "VPN connect [VLESS]: Xray failed to start:" << err;
         amnezia_xray_free(err);
         return false;
     }
 
+    qDebug() << "VPN connect [VLESS]: Xray core is running";
     return true;
 }
 
 bool Xray::stopXray()
 {
-    qDebug() << "Xray::stopXray()";
+    qDebug() << "VPN connect [VLESS]: stopping Xray core";
     if (auto err = amnezia_xray_stop(); err != nullptr) {
-        qDebug() << "[xray] failed to stop: " << err;
+        qWarning() << "VPN connect [VLESS]: Xray failed to stop:" << err;
         amnezia_xray_free(err);
         return false;
     }
 
+    qDebug() << "VPN connect [VLESS]: Xray core stopped";
     return true;
 }
 

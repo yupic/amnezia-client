@@ -109,7 +109,7 @@ void WindowsTunnelService::timeout() {
 }
 
 bool WindowsTunnelService::start(const QString& configData) {
-  logger.debug() << "Starting the tunnel service";
+  logger.info() << "VPN connect [WireGuard/AWG]: starting Windows tunnel service";
 
   m_logworker = new WindowsTunnelLogger(WindowsCommons::tunnelLogFile());
   m_logworker->moveToThread(&m_logthread);
@@ -154,9 +154,10 @@ bool WindowsTunnelService::start(const QString& configData) {
                           (const wchar_t*)serviceCmdline.utf16(), nullptr, 0,
                           TEXT("Nsi\0TcpIp\0"), nullptr, nullptr);
   if (!service) {
-    WindowsUtils::windowsLog("Failed to create the tunnel service");
+    WindowsUtils::windowsLog("VPN connect [WireGuard/AWG]: failed to create the tunnel service");
     return false;
   }
+  logger.info() << "VPN connect [WireGuard/AWG]: Windows tunnel service created";
 
   SERVICE_DESCRIPTION sd = {
       (wchar_t*)L"Manages the Amnezia VPN tunnel connection"};
@@ -175,19 +176,19 @@ bool WindowsTunnelService::start(const QString& configData) {
   }
 
   if (!StartService(service, 0, nullptr)) {
-    WindowsUtils::windowsLog("Failed to start the service");
+    WindowsUtils::windowsLog("VPN connect [WireGuard/AWG]: failed to start the tunnel service");
     return false;
   }
 
   if (waitForServiceStatus(service, SERVICE_RUNNING)) {
-    logger.debug() << "The tunnel service is up and running";
+    logger.info() << "VPN connect [WireGuard/AWG]: Windows tunnel service is running";
     guard.dismiss();
     m_service = service;
     m_timer.start(WINDOWS_TUNNEL_MONITOR_TIMEOUT_MSEC);
     return true;
   }
 
-  logger.error() << "Failed to run the tunnel service";
+  logger.error() << "VPN connect [WireGuard/AWG]: failed to run the tunnel service";
 
   SERVICE_STATUS status;
   if (!QueryServiceStatus(service, &status)) {

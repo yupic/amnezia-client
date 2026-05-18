@@ -33,11 +33,24 @@ void IpcServerProcess::start()
         qDebug() << "IpcServerProcess failed to start, program is empty";
     }
 
+    if (m_program == amnezia::PermittedProcess::Tun2Socks) {
+        qDebug() << "VPN connect [VLESS]: service starting tun2socks process"
+                 << m_process->program() << m_process->arguments();
+    }
     Utils::killProcessByName(m_process->program());
     m_process->start();
     qDebug() << "IpcServerProcess started, " << m_process->program() << m_process->arguments();
 
-    m_process->waitForStarted();
+    if (!m_process->waitForStarted()) {
+        if (m_program == amnezia::PermittedProcess::Tun2Socks) {
+            qCritical() << "VPN connect [VLESS]: tun2socks process failed to start"
+                        << m_process->errorString();
+        }
+        return;
+    }
+    if (m_program == amnezia::PermittedProcess::Tun2Socks) {
+        qDebug() << "VPN connect [VLESS]: tun2socks process started";
+    }
 }
 
 void IpcServerProcess::terminate() {

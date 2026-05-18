@@ -58,9 +58,12 @@ void WireguardUtilsMacos::tunnelErrorOccurred(QProcess::ProcessError error) {
 }
 
 bool WireguardUtilsMacos::addInterface(const InterfaceConfig& config) {
-  Q_UNUSED(config);
+  const QString protocolLabel = !config.m_junkPacketCount.isEmpty() || !config.m_initPacketMagicHeader.isEmpty()
+                                    ? QStringLiteral("AWG")
+                                    : QStringLiteral("WireGuard");
+  logger.info() << QString("VPN connect [%1]: starting userspace tunnel backend").arg(protocolLabel);
   if (m_tunnel.state() != QProcess::NotRunning) {
-    logger.warning() << "Unable to start: tunnel process already running";
+    logger.warning() << QString("VPN connect [%1]: unable to start, tunnel process already running").arg(protocolLabel);
     return false;
   }
 
@@ -81,18 +84,19 @@ bool WireguardUtilsMacos::addInterface(const InterfaceConfig& config) {
   QStringList wgArgs = {"-f", "utun"};
   m_tunnel.start(appPath.filePath("wireguard-go"), wgArgs);
   if (!m_tunnel.waitForStarted(WG_TUN_PROC_TIMEOUT)) {
-    logger.error() << "Unable to start tunnel process due to timeout";
+    logger.error() << QString("VPN connect [%1]: unable to start userspace tunnel process due to timeout").arg(protocolLabel);
     m_tunnel.kill();
     return false;
   }
+  logger.info() << QString("VPN connect [%1]: userspace tunnel process started").arg(protocolLabel);
 
   m_ifname = waitForTunnelName(wgNameFile);
   if (m_ifname.isNull()) {
-    logger.error() << "Unable to read tunnel interface name";
+    logger.error() << QString("VPN connect [%1]: unable to read tunnel interface name").arg(protocolLabel);
     m_tunnel.kill();
     return false;
   }
-  logger.debug() << "Created wireguard interface" << m_ifname;
+  logger.info() << QString("VPN connect [%1]: tunnel interface created").arg(protocolLabel) << m_ifname;
 
   // Start the routing table monitor.
   m_rtmonitor = new MacosRouteMonitor(m_ifname, this);
@@ -144,9 +148,12 @@ bool WireguardUtilsMacos::addInterface(const InterfaceConfig& config) {
 
   int err = uapiErrno(uapiCommand(message));
   if (err != 0) {
-    logger.error() << "Interface configuration failed:" << strerror(err);
+    logger.error() << QString("VPN connect [%1]: interface private key/options configuration failed:").arg(protocolLabel)
+                   << strerror(err);
   } else {
+    logger.info() << QString("VPN connect [%1]: interface private key/options configured").arg(protocolLabel);
     if (config.m_killSwitchEnabled) {
+      logger.info() << QString("VPN connect [%1]: applying kill switch firewall rules").arg(protocolLabel);
       FirewallParams params { };
       params.dnsServers.append(config.m_primaryDnsServer);
       if (!config.m_secondaryDnsServer.isEmpty()) {
@@ -168,6 +175,7 @@ bool WireguardUtilsMacos::addInterface(const InterfaceConfig& config) {
           }
       }
       applyFirewallRules(params);
+      logger.info() << QString("VPN connect [%1]: kill switch firewall rules applied").arg(protocolLabel);
     }
   }
   return (err == 0);
@@ -202,13 +210,18 @@ bool WireguardUtilsMacos::deleteInterface() {
 
 // dummy implementations for now
 bool WireguardUtilsMacos::updatePeer(const InterfaceConfig& config) {
+  const QString protocolLabel = !config.m_junkPacketCount.isEmpty() || !config.m_initPacketMagicHeader.isEmpty()
+                                    ? QStringLiteral("AWG")
+                                    : QStringLiteral("WireGuard");
   QByteArray publicKey =
       QByteArray::fromBase64(qPrintable(config.m_serverPublicKey));
 
   QByteArray pskKey = QByteArray::fromBase64(qPrintable(config.m_serverPskKey));
 
-  logger.debug() << "Configuring peer" << config.m_serverPublicKey
-                 << "via" << config.m_serverIpv4AddrIn;
+  logger.info() << QString("VPN connect [%1]: configuring server peer via %2:%3")
+                       .arg(protocolLabel,
+                            logger.sensitive(config.m_serverIpv4AddrIn),
+                            QString::number(config.m_serverPort));
 
   // Update/create the peer config
   QString message;
@@ -223,7 +236,7 @@ bool WireguardUtilsMacos::updatePeer(const InterfaceConfig& config) {
   } else if (!config.m_serverIpv6AddrIn.isNull()) {
     out << "endpoint=[" << config.m_serverIpv6AddrIn << "]:";
   } else {
-    logger.warning() << "Failed to create peer with no endpoints";
+    logger.warning() << QString("VPN connect [%1]: failed to create peer with no endpoints").arg(protocolLabel);
     return false;
   }
   out << config.m_serverPort << "\n";
@@ -243,7 +256,9 @@ bool WireguardUtilsMacos::updatePeer(const InterfaceConfig& config) {
 
   int err = uapiErrno(uapiCommand(message));
   if (err != 0) {
-    logger.error() << "Peer configuration failed:" << strerror(err);
+    logger.error() << QString("VPN connect [%1]: peer configuration failed:").arg(protocolLabel) << strerror(err);
+  } else {
+    logger.info() << QString("VPN connect [%1]: server peer configuration accepted by backend").arg(protocolLabel);
   }
   return (err == 0);
 }
