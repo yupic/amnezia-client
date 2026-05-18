@@ -144,7 +144,7 @@ int RouterWin::routeAddList(const QString &gw, const QStringList &ips)
 
     qDebug() << "Router::routeAddList finished, success: " << success_count << "/" << ips.size();
 
-    if (m_ipForwardRows.size() > 500) suspendWcmSvc(true);
+    //if (m_ipForwardRows.size() > 500) suspendWcmSvc(true);
 
     return success_count;
 }
