@@ -18,7 +18,7 @@ Tunnel::Tunnel(QString ifname,
 Tunnel::~Tunnel() = default;
 
 void Tunnel::prepare() {
-    if (m_state != State::Idle && m_state != State::Failed) {
+    if (m_state != State::Idle) {
         return;
     }
 
