@@ -77,10 +77,8 @@ bool Daemon::activate(const QString& ifname, const InterfaceConfig& config) {
   cs.m_date = QDateTime();
   cs.m_deadline = QDateTime::currentDateTime().addMSecs(ACTIVATION_TIMEOUT_MSEC);
 
-  const bool isPrimaryActivation = (m_primaryIfname == ifname);
-  auto failure_guard = qScopeGuard([this, ifname, isPrimaryActivation] {
+  auto failure_guard = qScopeGuard([this, ifname] {
     deactivateTunnel(ifname);
-    if (isPrimaryActivation) emit activationFailure();
   });
 
   prepareActivation(config);
@@ -138,7 +136,6 @@ bool Daemon::setPrimary(const QString& ifname, const InterfaceConfig& config) {
 
   auto failure_guard = qScopeGuard([this, ifname] {
     deactivateTunnel(ifname);
-    emit activationFailure();
   });
 
   for (const QString& i : config.m_excludedAddresses) {

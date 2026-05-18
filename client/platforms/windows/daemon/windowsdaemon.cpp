@@ -37,9 +37,6 @@ WindowsDaemon::WindowsDaemon() : Daemon(nullptr) {
 
   m_dnsutils = new DnsUtilsWindows(this);
   m_splitTunnelManager = WindowsSplitTunnel::create(m_firewallManager);
-
-  connect(this, &WindowsDaemon::activationFailure,
-          [this]() { m_firewallManager->disableKillSwitch(); });
 }
 
 WindowsDaemon::~WindowsDaemon() {

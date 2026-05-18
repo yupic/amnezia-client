@@ -52,11 +52,6 @@ class Daemon : public QObject {
  signals:
   void tunnelConnected(const QString& ifname, const QString& pubkey);
   void tunnelHandshakeFailed(const QString& ifname);
-  /**
-   * Can be fired if a call to activate() was unsucessfull
-   * and connected systems should rollback
-   */
-  void activationFailure();
   void disconnected();
   void backendFailure(DaemonError reason = DaemonError::ERROR_FATAL);
 
