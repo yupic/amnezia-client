@@ -158,11 +158,10 @@ bool Daemon::activate(const InterfaceConfig& config) {
     logger.info() << logPrefix << "interface is up";
   }
 
-  // Configure routing for excluded addresses.
-  for (const QString& i : config.m_excludedAddresses) {
-    logger.info() << logPrefix << "adding exclusion route" << logger.sensitive(i);
-    addExclusionRoute(IPAddress(i));
-  }
+  logger.info() << logPrefix << "configuring exclusion routes"
+                << QString::number(config.m_excludedAddresses.size());
+  addExclusionRoutes(config.m_excludedAddresses);
+  logger.info() << logPrefix << "exclusion routes configured";
 
   // Add the peer to this interface.
   logger.info() << logPrefix << "configuring server peer";
@@ -260,6 +259,35 @@ bool Daemon::addExclusionRoute(const IPAddress& prefix) {
     return false;
   }
   m_excludedAddrSet[prefix] = 1;
+  return true;
+}
+
+bool Daemon::addExclusionRoutes(const QStringList& addresses) {
+  QList<IPAddress> newPrefixes;
+  QHash<IPAddress, int> newPrefixCounts;
+
+  for (const QString& address : addresses) {
+    IPAddress prefix(address);
+    if (m_excludedAddrSet.contains(prefix)) {
+      m_excludedAddrSet[prefix]++;
+      continue;
+    }
+
+    newPrefixCounts[prefix]++;
+  }
+
+  newPrefixes = newPrefixCounts.keys();
+  if (newPrefixes.isEmpty()) {
+    return true;
+  }
+
+  if (!wgutils()->addExclusionRoutes(newPrefixes)) {
+    return false;
+  }
+
+  for (const IPAddress& prefix : newPrefixes) {
+    m_excludedAddrSet[prefix] = newPrefixCounts.value(prefix);
+  }
   return true;
 }
 
@@ -558,9 +586,7 @@ bool Daemon::switchServer(const InterfaceConfig& config) {
       m_connections.value(config.m_hopType).m_config;
 
   // Configure routing for new excluded addresses.
-  for (const QString& i : config.m_excludedAddresses) {
-    addExclusionRoute(IPAddress(i));
-  }
+  addExclusionRoutes(config.m_excludedAddresses);
 
   // Activate the new peer and its routes.
   if (!wgutils()->updatePeer(config)) {

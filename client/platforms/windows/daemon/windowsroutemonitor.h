@@ -12,8 +12,11 @@
 #include <ws2ipdef.h>
 
 #include <QHash>
+#include <QList>
 #include <QMap>
 #include <QObject>
+
+#include <atomic>
 
 #include "ipaddress.h"
 
@@ -27,10 +30,12 @@ class WindowsRouteMonitor final : public QObject {
   void setDetaultRouteCapture(bool enable);
 
   bool addExclusionRoute(const IPAddress& prefix);
+  bool addExclusionRoutes(const QList<IPAddress>& prefixes);
   bool deleteExclusionRoute(const IPAddress& prefix);
   void flushExclusionRoutes() { return flushRouteTable(m_exclusionRoutes); };
 
   quint64 getLuid() const { return m_luid; }
+  void notifyRouteChanged();
 
  public slots:
   void routeChanged();
@@ -42,7 +47,8 @@ class WindowsRouteMonitor final : public QObject {
   static QHostAddress prefixToAddress(const IP_ADDRESS_PREFIX* dest);
 
   void flushRouteTable(QHash<IPAddress, MIB_IPFORWARD_ROW2*>& table);
-  void updateExclusionRoute(MIB_IPFORWARD_ROW2* data, void* table);
+  MIB_IPFORWARD_ROW2* createExclusionRouteData(const IPAddress& prefix) const;
+  void updateExclusionRoutes(void* table);
   void updateInterfaceMetrics(int family);
   void updateCapturedRoutes(int family);
   void updateCapturedRoutes(int family, void* table);
@@ -57,6 +63,9 @@ class WindowsRouteMonitor final : public QObject {
 
   const quint64 m_luid = 0;
   HANDLE m_routeHandle = INVALID_HANDLE_VALUE;
+  std::atomic_bool m_bulkRouteUpdate = false;
+  std::atomic_bool m_routeChangeQueued = false;
+  std::atomic_bool m_routeChangePending = false;
 };
 
 #endif /* WINDOWSROUTEMONITOR_H */
