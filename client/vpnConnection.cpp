@@ -70,7 +70,7 @@ void VpnConnection::onConnectionStateChanged(Vpn::ConnectionState state)
 #ifdef AMNEZIA_DESKTOP
     switch (state) {
         case Vpn::ConnectionState::Connected: {
-            m_trafficGuard->setupRoutes(m_vpnConfiguration, m_vpnProtocol, m_remoteAddress);
+            m_trafficGuard->setupRoutes(m_vpnConfiguration, vpnProtocol(), m_remoteAddress);
         } break;
         default:
             break;
@@ -97,13 +97,13 @@ void VpnConnection::setRepositories(SecureServersRepository* serversRepository, 
 
 QSharedPointer<VpnProtocol> VpnConnection::vpnProtocol() const
 {
-    return m_vpnProtocol;
+    return m_active ? m_active->protocol() : m_vpnProtocol;
 }
 
 void VpnConnection::disconnectSlots()
 {
-    if (m_vpnProtocol) {
-        m_vpnProtocol->disconnect();
+    if (auto proto = vpnProtocol()) {
+        proto->disconnect();
     }
 }
 
@@ -113,11 +113,8 @@ ErrorCode VpnConnection::lastError() const
     return ErrorCode::AndroidError;
 #endif
 
-    if (m_vpnProtocol.isNull()) {
-        return ErrorCode::InternalError;
-    }
-
-    return m_vpnProtocol.data()->lastError();
+    auto proto = vpnProtocol();
+    return proto.isNull() ? ErrorCode::InternalError : proto->lastError();
 }
 
 Vpn::ConnectionState VpnConnection::connectionState() const
@@ -499,7 +496,6 @@ void VpnConnection::disconnectFromVpn()
         releaseIfname(m_active->ifname());
         delete m_active;
         m_active = nullptr;
-        m_vpnProtocol.reset();
         setConnectionState(Vpn::ConnectionState::Disconnected);
         return;
     }
@@ -590,19 +586,17 @@ void VpnConnection::onTunnelActivated()
         m_staging = nullptr;
         m_vpnConfiguration = m_active->config();
         m_remoteAddress = m_active->remoteAddress();
-        m_vpnProtocol = m_active->protocol();
         m_trafficGuard->setConfig(m_vpnConfiguration);
 
-        if (m_vpnProtocol) {
-            m_trafficGuard->applyFirewall(m_vpnProtocol->vpnGateway(),
-                                          m_vpnProtocol->vpnLocalAddress());
+        if (auto proto = m_active->protocol()) {
+            m_trafficGuard->applyFirewall(proto->vpnGateway(),
+                                          proto->vpnLocalAddress());
         }
         setConnectionState(Vpn::ConnectionState::Connected);
         return;
     }
 
     if (tunnel == m_active) {
-        m_vpnProtocol = m_active->protocol();
         setConnectionState(Vpn::ConnectionState::Connected);
     }
 }
@@ -630,7 +624,6 @@ void VpnConnection::onTunnelFailed(amnezia::ErrorCode error)
         releaseIfname(m_active->ifname());
         delete m_active;
         m_active = nullptr;
-        m_vpnProtocol.reset();
         setConnectionState(Vpn::ConnectionState::Error);
         if (error != ErrorCode::NoError) {
             emit vpnProtocolError(error);
