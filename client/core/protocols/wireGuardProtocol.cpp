@@ -52,6 +52,11 @@ WireguardProtocol::WireguardProtocol(const QJsonObject &configuration, QObject *
                 Q_UNUSED(ifname)
                 emit primaryReady();
             });
+    connect(m_impl.get(), &ControllerImpl::primaryFailed, this,
+            [this](const QString& ifname) {
+                Q_UNUSED(ifname)
+                emit primaryFailed();
+            });
     m_impl->initialize(nullptr, nullptr);
 }
 

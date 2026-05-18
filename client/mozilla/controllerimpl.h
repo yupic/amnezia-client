@@ -79,6 +79,7 @@ class ControllerImpl : public QObject {
   void disconnected(const QString& ifname);
 
   void primaryReady(const QString& ifname);
+  void primaryFailed(const QString& ifname);
 
   // This method should be emitted after a checkStatus() call.
   // "serverIpv4Gateway" is the current VPN tunnel gateway.

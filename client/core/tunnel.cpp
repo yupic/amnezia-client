@@ -40,6 +40,8 @@ void Tunnel::prepare() {
             this, &Tunnel::addressesUpdated);
     connect(m_protocol.data(), &VpnProtocol::primaryReady,
             this, &Tunnel::onPrimaryReady);
+    connect(m_protocol.data(), &VpnProtocol::primaryFailed,
+            this, &Tunnel::onPrimaryFailed);
 
     startActivationDeadline(ACTIVATION_TIMEOUT_MSEC);
 
@@ -56,6 +58,7 @@ void Tunnel::commit() {
         return;
     }
     setState(State::Committing);
+    startActivationDeadline(ACTIVATION_TIMEOUT_MSEC);
     if (m_protocol) {
         m_protocol->setPrimary(m_config);
     }
@@ -65,8 +68,18 @@ void Tunnel::onPrimaryReady() {
     if (m_state != State::Committing) {
         return;
     }
+    cancelActivationDeadline();
     setState(State::Active);
     emit activated();
+}
+
+void Tunnel::onPrimaryFailed() {
+    if (m_state != State::Committing) {
+        return;
+    }
+    cancelActivationDeadline();
+    setState(State::Failed);
+    emit failed(m_protocol ? m_protocol->lastError() : amnezia::ErrorCode::InternalError);
 }
 
 void Tunnel::deactivate() {
@@ -94,7 +107,7 @@ void Tunnel::startActivationDeadline(int msec) {
         m_deadline = new QTimer(this);
         m_deadline->setSingleShot(true);
         connect(m_deadline, &QTimer::timeout, this, [this]() {
-            if (m_state != State::Preparing) {
+            if (m_state != State::Preparing && m_state != State::Committing) {
                 return;
             }
             setState(State::Failed);

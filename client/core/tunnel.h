@@ -68,6 +68,7 @@ protected:
 private:
     void onProtocolStateChanged(Vpn::ConnectionState state);
     void onPrimaryReady();
+    void onPrimaryFailed();
 
     State m_state = State::Idle;
     QTimer* m_deadline = nullptr;

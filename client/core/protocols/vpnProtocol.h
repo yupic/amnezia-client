@@ -82,6 +82,7 @@ signals:
     void protocolError(amnezia::ErrorCode e);
     void tunnelAddressesUpdated(const QString& gateway, const QString& localAddress);
     void primaryReady();
+    void primaryFailed();
 
 public slots:
     virtual void onTimeout(); // todo: remove?

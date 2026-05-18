@@ -139,6 +139,10 @@ void DaemonLocalServerConnection::parseCommand(const QByteArray& data) {
     if (!Daemon::instance()->setPrimary(config.m_ifname, config)) {
       logger.error() << "setPrimary failed";
       Daemon::instance()->deactivateTunnel(config.m_ifname);
+      QJsonObject reply;
+      reply.insert("type", "primaryFailed");
+      reply.insert("ifname", config.m_ifname);
+      write(reply);
       return;
     }
     QJsonObject reply;
