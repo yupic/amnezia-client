@@ -206,8 +206,12 @@ bool WireguardUtilsWindows::updatePeer(const InterfaceConfig& config) {
 
   // Exclude the server address, except for multihop exit servers.
   if (m_routeMonitor && config.m_hopType != InterfaceConfig::MultiHopExit) {
-    m_routeMonitor->addExclusionRoute(IPAddress(config.m_serverIpv4AddrIn));
-    m_routeMonitor->addExclusionRoute(IPAddress(config.m_serverIpv6AddrIn));
+    if (!config.m_serverIpv4AddrIn.isEmpty()) {
+      m_routeMonitor->addExclusionRoute(IPAddress(config.m_serverIpv4AddrIn));
+    }
+    if (!config.m_serverIpv6AddrIn.isEmpty()) {
+      m_routeMonitor->addExclusionRoute(IPAddress(config.m_serverIpv6AddrIn));
+    }
   }
 
   QString reply = m_tunnel.uapiCommand(message);
@@ -226,8 +230,12 @@ bool WireguardUtilsWindows::deletePeer(const InterfaceConfig& config) {
 
   // Clear exclustion routes for this peer.
   if (m_routeMonitor && config.m_hopType != InterfaceConfig::MultiHopExit) {
-    m_routeMonitor->deleteExclusionRoute(IPAddress(config.m_serverIpv4AddrIn));
-    m_routeMonitor->deleteExclusionRoute(IPAddress(config.m_serverIpv6AddrIn));
+    if (!config.m_serverIpv4AddrIn.isEmpty()) {
+      m_routeMonitor->deleteExclusionRoute(IPAddress(config.m_serverIpv4AddrIn));
+    }
+    if (!config.m_serverIpv6AddrIn.isEmpty()) {
+      m_routeMonitor->deleteExclusionRoute(IPAddress(config.m_serverIpv6AddrIn));
+    }
   }
 
   // Disable the windows firewall for this peer.
@@ -334,6 +342,11 @@ bool WireguardUtilsWindows::addExclusionRoute(const IPAddress& prefix) {
   return m_routeMonitor->addExclusionRoute(prefix);
 }
 
+bool WireguardUtilsWindows::addExclusionRoutes(
+    const QList<IPAddress>& prefixes) {
+  return m_routeMonitor->addExclusionRoutes(prefixes);
+}
+
 bool WireguardUtilsWindows::deleteExclusionRoute(const IPAddress& prefix) {
   return m_routeMonitor->deleteExclusionRoute(prefix);
 }
@@ -342,13 +355,8 @@ bool WireguardUtilsWindows::excludeLocalNetworks(
     const QList<IPAddress>& addresses) {
   // If the interface isn't up then something went horribly wrong.
   Q_ASSERT(m_routeMonitor);
-  // For each destination - attempt to exclude it from the VPN tunnel.
-  bool result = true;
-  for (const IPAddress& prefix : addresses) {
-    if (!m_routeMonitor->addExclusionRoute(prefix)) {
-      result = false;
-    }
-  }
+  bool result = m_routeMonitor->addExclusionRoutes(addresses);
+
   // Permit LAN traffic through the firewall.
   if (!m_firewall->enableLanBypass(addresses)) {
     result = false;

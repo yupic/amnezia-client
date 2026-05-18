@@ -9,6 +9,7 @@
 
 #include <QCoreApplication>
 #include <QHostAddress>
+#include <QList>
 #include <QObject>
 #include <QStringList>
 
@@ -45,6 +46,15 @@ class WireguardUtils : public QObject {
   virtual bool deleteRoutePrefix(const IPAddress& prefix) = 0;
   
   virtual bool addExclusionRoute(const IPAddress& prefix) = 0;
+  virtual bool addExclusionRoutes(const QList<IPAddress>& prefixes) {
+    bool result = true;
+    for (const IPAddress& prefix : prefixes) {
+      if (!addExclusionRoute(prefix)) {
+        result = false;
+      }
+    }
+    return result;
+  }
   virtual bool deleteExclusionRoute(const IPAddress& prefix) = 0;
 
   virtual bool excludeLocalNetworks(const QList<IPAddress>& addresses) = 0;
