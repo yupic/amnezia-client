@@ -16,6 +16,53 @@ LONG (NTAPI * NtResumeProcess)(HANDLE ProcessHandle)  = NULL;
 
 QList<QString> RouterWin::kIpv6Subnets = { "fc00::/7", "2000::/4", "3000::/4" };
 
+namespace
+{
+DWORD interfaceIndexForGateway(const QString &gateway)
+{
+    ULONG bufferSize = 0;
+    DWORD status = GetAdaptersAddresses(AF_INET, GAA_FLAG_INCLUDE_GATEWAYS, nullptr, nullptr, &bufferSize);
+    if (status != ERROR_BUFFER_OVERFLOW || bufferSize == 0) {
+        return 0;
+    }
+
+    auto *addresses = reinterpret_cast<PIP_ADAPTER_ADDRESSES>(malloc(bufferSize));
+    if (!addresses) {
+        qDebug() << "interfaceIndexForGateway: malloc failed";
+        return 0;
+    }
+
+    status = GetAdaptersAddresses(AF_INET, GAA_FLAG_INCLUDE_GATEWAYS, nullptr, addresses, &bufferSize);
+    if (status != NO_ERROR) {
+        qDebug() << "interfaceIndexForGateway: GetAdaptersAddresses failed:" << status;
+        free(addresses);
+        return 0;
+    }
+
+    DWORD interfaceIndex = 0;
+    char buffer[INET_ADDRSTRLEN] = {};
+    for (PIP_ADAPTER_ADDRESSES adapter = addresses; adapter && interfaceIndex == 0; adapter = adapter->Next) {
+        for (PIP_ADAPTER_GATEWAY_ADDRESS_LH adapterGateway = adapter->FirstGatewayAddress;
+             adapterGateway;
+             adapterGateway = adapterGateway->Next) {
+            if (!adapterGateway->Address.lpSockaddr || adapterGateway->Address.lpSockaddr->sa_family != AF_INET) {
+                continue;
+            }
+
+            const auto *addr = reinterpret_cast<sockaddr_in *>(adapterGateway->Address.lpSockaddr);
+            const char *gatewayAddress = inet_ntop(AF_INET, &addr->sin_addr, buffer, sizeof(buffer));
+            if (gatewayAddress && gateway == QString::fromLatin1(gatewayAddress)) {
+                interfaceIndex = adapter->IfIndex;
+                break;
+            }
+        }
+    }
+
+    free(addresses);
+    return interfaceIndex;
+}
+}
+
 RouterWin &RouterWin::Instance()
 {
     static RouterWin s;
@@ -37,7 +84,6 @@ int RouterWin::routeAddList(const QString &gw, const QStringList &ips)
 
 //    qDebug().noquote() << QString("ROUTE ADD List: IPs:\n%1")
 //                          .arg(ips.join("\n"));
-
 
     if (!NetworkUtilities::checkIPv4Format(gw)) {
         qCritical().noquote() << "Trying to add invalid route, gw: " << gw;
@@ -81,9 +127,14 @@ int RouterWin::routeAddList(const QString &gw, const QStringList &ips)
 
     // Set iface for route
     IPAddr dwGwAddr = inet_addr(gw.toStdString().c_str());
-    if (GetBestInterface(dwGwAddr, &ipfrow.dwForwardIfIndex) != NO_ERROR) {
-        qDebug() << "Router::routeAddList : GetBestInterface failed";
-        return false;
+    const DWORD gatewayInterfaceIndex = interfaceIndexForGateway(gw);
+    if (gatewayInterfaceIndex > 0) {
+        ipfrow.dwForwardIfIndex = gatewayInterfaceIndex;
+    } else {
+        if (GetBestInterface(dwGwAddr, &ipfrow.dwForwardIfIndex) != NO_ERROR) {
+            qDebug() << "Router::routeAddList : GetBestInterface failed";
+            return false;
+        }
     }
 
     // Get TAP iface metric to set it for new routes
