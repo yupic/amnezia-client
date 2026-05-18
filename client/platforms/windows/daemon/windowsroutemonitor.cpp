@@ -258,7 +258,7 @@ void WindowsRouteMonitor::updateCapturedRoutes(int family) {
 
   PMIB_IPFORWARD_TABLE2 table;
   DWORD error = GetIpForwardTable2(family, &table);
-  if (error != NO_ERROR) {
+  if (error == NO_ERROR) {
     updateCapturedRoutes(family, table);
     FreeMibTable(table);
   }
