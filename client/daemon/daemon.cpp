@@ -132,6 +132,8 @@ bool Daemon::setPrimary(const QString& ifname, const InterfaceConfig& config) {
     logger.error() << "setPrimary: no tunnel for" << ifname;
     return false;
   }
+
+  const QString priorPrimary = m_primaryIfname;
   m_primaryIfname = ifname;
 
   auto failure_guard = qScopeGuard([this, ifname] {
@@ -159,8 +161,36 @@ bool Daemon::setPrimary(const QString& ifname, const InterfaceConfig& config) {
 
   m_connections[ifname].m_config = config;
 
+  // Demote the prior primary AFTER the new primary is fully installed.
+  // Delete-after-install order preserves coverage during the make-before-break overlap.
+  if (!priorPrimary.isEmpty() && priorPrimary != ifname) {
+    demotePrimary(priorPrimary);
+  }
+
   failure_guard.dismiss();
   return true;
+}
+
+void Daemon::demotePrimary(const QString& ifname) {
+  WireguardUtils* wg = wgutilsFor(ifname);
+  if (!wg) {
+    return;
+  }
+  const ConnectionState cs = m_connections.value(ifname);
+  const InterfaceConfig& config = cs.m_config;
+
+  for (const IPAddress& ip : config.m_allowedIPAddressRanges) {
+    wg->deleteRoutePrefix(ip);
+  }
+  for (const QString& addr : config.m_excludedAddresses) {
+    if (addr.isEmpty()) {
+      continue;
+    }
+    IPAddress ip(addr);
+    if (m_excludedAddrSet.contains(ip)) {
+      delExclusionRoute(ip);
+    }
+  }
 }
 
 bool Daemon::deactivateTunnel(const QString& ifname) {

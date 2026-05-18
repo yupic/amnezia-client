@@ -64,6 +64,7 @@ class Daemon : public QObject {
   bool maybeUpdateResolvers(const InterfaceConfig& config);
   bool addExclusionRoute(const IPAddress& address);
   bool delExclusionRoute(const IPAddress& address);
+  void demotePrimary(const QString& ifname);
   void checkActivations();
   QTimer m_activationTimer;
 
