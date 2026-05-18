@@ -149,6 +149,9 @@ void VpnConnection::wireTunnelSignals(Tunnel* tunnel, bool isActive)
 
     if (isActive) {
         connect(tunnel, &Tunnel::bytesChanged, this, &VpnConnection::onBytesChanged);
+        // Staging tunnel deliberately skips this wire: applying KS while the old
+        // primary is still serving would clobber its allow-rules. onTunnelActivated
+        // invokes applyFirewall manually after the make-before-break swap.
         connect(tunnel, &Tunnel::addressesUpdated,
                 m_trafficGuard.data(), &VpnTrafficGuard::applyFirewall);
     }
