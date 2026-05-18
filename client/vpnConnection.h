@@ -99,6 +99,7 @@ private:
 
    void createProtocolConnections();
    void wireTunnelSignals(Tunnel* tunnel, bool isActive);
+   void wireDaemonReconnectSignals();
 
    QString allocateIfname();
    void releaseIfname(const QString& ifname);
