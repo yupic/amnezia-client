@@ -104,17 +104,21 @@ void DaemonLocalServerConnection::parseCommand(const QByteArray& data) {
   }
 
   if (type == "activate") {
+    logger.info() << "VPN connect [WireGuard/AWG]: service daemon received activation command";
     InterfaceConfig config;
     if (!Daemon::parseConfig(obj, config)) {
-      logger.error() << "Invalid configuration";
+      logger.error() << "VPN connect [WireGuard/AWG]: invalid activation configuration";
       emit disconnected();
       return;
     }
+    logger.info() << "VPN connect [WireGuard/AWG]: activation configuration parsed";
 
     if (!Daemon::instance()->activate(config)) {
-      logger.error() << "Failed to activate the interface";
+      logger.error() << "VPN connect [WireGuard/AWG]: failed to activate the interface";
       emit disconnected();
+      return;
     }
+    logger.info() << "VPN connect [WireGuard/AWG]: activation accepted by daemon";
     return;
   }
 

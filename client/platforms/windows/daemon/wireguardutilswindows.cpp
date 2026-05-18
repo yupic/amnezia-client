@@ -89,6 +89,10 @@ QList<WireguardUtils::PeerStatus> WireguardUtilsWindows::getPeerStatus() {
 }
 
 bool WireguardUtilsWindows::addInterface(const InterfaceConfig& config) {
+  const QString protocolLabel = !config.m_junkPacketCount.isEmpty() || !config.m_initPacketMagicHeader.isEmpty()
+                                    ? QStringLiteral("AWG")
+                                    : QStringLiteral("WireGuard");
+  logger.info() << QString("VPN connect [%1]: creating Windows tunnel service interface").arg(protocolLabel);
   QStringList addresses;
   for (const IPAddress& ip : config.m_allowedIPAddressRanges) {
     addresses.append(ip.toString());
@@ -98,9 +102,10 @@ bool WireguardUtilsWindows::addInterface(const InterfaceConfig& config) {
   extraConfig["Table"] = "off";
   QString configString = config.toWgConf(extraConfig);
   if (configString.isEmpty()) {
-    logger.error() << "Failed to create a config file";
+    logger.error() << QString("VPN connect [%1]: failed to create tunnel configuration").arg(protocolLabel);
     return false;
   }
+  logger.info() << QString("VPN connect [%1]: tunnel service configuration prepared").arg(protocolLabel);
 
   // We don't want to pass a peer just yet, that will happen later with
   // a UAPI command in WireguardUtilsWindows::updatePeer(), so truncate
@@ -111,30 +116,35 @@ bool WireguardUtilsWindows::addInterface(const InterfaceConfig& config) {
   }
 
   if (!m_tunnel.start(configString)) {
-    logger.error() << "Failed to activate the tunnel service";
+    logger.error() << QString("VPN connect [%1]: failed to activate the tunnel service").arg(protocolLabel);
     return false;
   }
+  logger.info() << QString("VPN connect [%1]: tunnel service started").arg(protocolLabel);
 
   // Determine the interface LUID
   NET_LUID luid;
   QString ifAlias = interfaceName();
   DWORD result = ConvertInterfaceAliasToLuid((wchar_t*)ifAlias.utf16(), &luid);
   if (result != 0) {
-    logger.error() << "Failed to lookup LUID:" << result;
+    logger.error() << QString("VPN connect [%1]: failed to lookup tunnel interface LUID:").arg(protocolLabel)
+                   << QString::number(result);
     return false;
   }
+  logger.info() << QString("VPN connect [%1]: tunnel interface LUID resolved").arg(protocolLabel);
   m_luid = luid.Value;
   m_routeMonitor = new WindowsRouteMonitor(luid.Value, this);
 
   if (config.m_killSwitchEnabled) {
+    logger.info() << QString("VPN connect [%1]: enabling Windows firewall kill switch for interface").arg(protocolLabel);
     // Enable the windows firewall
     NET_IFINDEX ifindex;
     ConvertInterfaceLuidToIndex(&luid, &ifindex);
     m_firewall->allowAllTraffic();
     m_firewall->enableInterface(ifindex);
+    logger.info() << QString("VPN connect [%1]: Windows firewall kill switch enabled for interface").arg(protocolLabel);
   }
 
-  logger.debug() << "Registration completed";
+  logger.info() << QString("VPN connect [%1]: tunnel interface registration completed").arg(protocolLabel);
   return true;
 }
 
@@ -149,17 +159,24 @@ bool WireguardUtilsWindows::deleteInterface() {
 }
 
 bool WireguardUtilsWindows::updatePeer(const InterfaceConfig& config) {
+  const QString protocolLabel = !config.m_junkPacketCount.isEmpty() || !config.m_initPacketMagicHeader.isEmpty()
+                                    ? QStringLiteral("AWG")
+                                    : QStringLiteral("WireGuard");
   QByteArray publicKey =
       QByteArray::fromBase64(qPrintable(config.m_serverPublicKey));
   QByteArray pskKey =
       QByteArray::fromBase64(qPrintable(config.m_serverPskKey));
 
   if (config.m_killSwitchEnabled) {
+    logger.info() << QString("VPN connect [%1]: enabling Windows firewall peer traffic").arg(protocolLabel);
     // Enable the windows firewall for this peer.
     m_firewall->enablePeerTraffic(config);
+    logger.info() << QString("VPN connect [%1]: Windows firewall peer traffic enabled").arg(protocolLabel);
   }
-  logger.debug() << "Configuring peer" << publicKey.toHex()
-                 << "via" << config.m_serverIpv4AddrIn;
+  logger.info() << QString("VPN connect [%1]: configuring server peer via %2:%3")
+                       .arg(protocolLabel,
+                            logger.sensitive(config.m_serverIpv4AddrIn),
+                            QString::number(config.m_serverPort));
 
   // Update/create the peer config
   QString message;
@@ -174,7 +191,7 @@ bool WireguardUtilsWindows::updatePeer(const InterfaceConfig& config) {
   } else if (!config.m_serverIpv6AddrIn.isNull()) {
     out << "endpoint=[" << config.m_serverIpv6AddrIn << "]:";
   } else {
-    logger.warning() << "Failed to create peer with no endpoints";
+    logger.warning() << QString("VPN connect [%1]: failed to create peer with no endpoints").arg(protocolLabel);
     return false;
   }
   out << config.m_serverPort << "\n";
@@ -194,7 +211,12 @@ bool WireguardUtilsWindows::updatePeer(const InterfaceConfig& config) {
   }
 
   QString reply = m_tunnel.uapiCommand(message);
-  logger.debug() << "DATA:" << reply;
+  if (reply.contains("errno=") && !reply.contains("errno=0")) {
+    logger.error() << QString("VPN connect [%1]: server peer configuration returned backend error").arg(protocolLabel)
+                   << reply;
+    return false;
+  }
+  logger.info() << QString("VPN connect [%1]: server peer configuration accepted by backend").arg(protocolLabel);
   return true;
 }
 

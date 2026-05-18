@@ -30,7 +30,7 @@ WindowsDaemonTunnel::~WindowsDaemonTunnel() {
 int WindowsDaemonTunnel::run(QStringList& tokens) {
   Q_ASSERT(!tokens.isEmpty());
 
-  logger.debug() << "Tunnel daemon service is starting";
+  logger.info() << "VPN connect [WireGuard/AWG]: Windows tunnel daemon process is starting";
 
   QCoreApplication app();
 
@@ -51,9 +51,10 @@ int WindowsDaemonTunnel::run(QStringList& tokens) {
   // FreeLibrary.
   HMODULE tunnelLib = LoadLibrary(TEXT("tunnel.dll"));
   if (!tunnelLib) {
-    WindowsUtils::windowsLog("Failed to load tunnel.dll");
+    WindowsUtils::windowsLog("VPN connect [WireGuard/AWG]: failed to load tunnel.dll");
     return 1;
   }
+  logger.info() << "VPN connect [WireGuard/AWG]: tunnel.dll loaded";
 
   typedef bool WireGuardTunnelService(const ushort* settings,
                                       const ushort* name);
@@ -61,15 +62,16 @@ int WindowsDaemonTunnel::run(QStringList& tokens) {
   WireGuardTunnelService* tunnelProc = (WireGuardTunnelService*)GetProcAddress(
       tunnelLib, "WireGuardTunnelService");
   if (!tunnelProc) {
-    WindowsUtils::windowsLog("Failed to get WireGuardTunnelService function");
+    WindowsUtils::windowsLog("VPN connect [WireGuard/AWG]: failed to get WireGuardTunnelService function");
     return 1;
   }
   auto name = WireguardUtilsWindows::s_interfaceName();
   if (!tunnelProc(maybeConfig.utf16(), name.utf16())) {
-    logger.error() << "Failed to activate the tunnel service";
+    logger.error() << "VPN connect [WireGuard/AWG]: WireGuardTunnelService failed to activate tunnel";
     return 1;
   }
 
+  logger.info() << "VPN connect [WireGuard/AWG]: WireGuardTunnelService finished successfully";
   return 0;
 }
 

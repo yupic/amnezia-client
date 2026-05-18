@@ -124,6 +124,10 @@ void LocalSocketController::daemonConnected() {
 
 void LocalSocketController::activate(const QJsonObject &rawConfig) {
   QString protocolName = rawConfig.value("protocol").toString();
+  const QString vpnLogProtocol = protocolName == amnezia::config_key::awg
+                                     ? QStringLiteral("AWG")
+                                     : QStringLiteral("WireGuard");
+  logger.info() << QString("VPN connect [%1]: client daemon activation requested").arg(vpnLogProtocol);
 
   int splitTunnelType = rawConfig.value("splitTunnelType").toInt();
   QJsonArray splitTunnelSites = rawConfig.value("splitTunnelSites").toArray();
@@ -133,6 +137,10 @@ void LocalSocketController::activate(const QJsonObject &rawConfig) {
   QJsonArray allowedDns = rawConfig.value(amnezia::configKey::allowedDnsServers).toArray();
 
   QJsonObject wgConfig = rawConfig.value(protocolName + "_config_data").toObject();
+  logger.info() << QString("VPN connect [%1]: preparing daemon activation for endpoint %2:%3")
+                       .arg(vpnLogProtocol,
+                            logger.sensitive(wgConfig.value(amnezia::config_key::hostName).toString()),
+                            QString::number(wgConfig.value(amnezia::config_key::port).toInt()));
 
   QJsonObject json;
   json.insert("type", "activate");
@@ -261,6 +269,7 @@ void LocalSocketController::activate(const QJsonObject &rawConfig) {
     }
   }
 
+  logger.info() << QString("VPN connect [%1]: activation command sent to service daemon").arg(vpnLogProtocol);
   write(json);
 }
 

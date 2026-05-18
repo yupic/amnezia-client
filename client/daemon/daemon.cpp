@@ -24,6 +24,15 @@ Logger logger("Daemon");
 
 Daemon* s_daemon = nullptr;
 
+QString vpnConnectLogPrefix(const InterfaceConfig& config) {
+  const bool hasAwgParameters =
+      !config.m_junkPacketCount.isEmpty() ||
+      !config.m_initPacketMagicHeader.isEmpty() ||
+      !config.m_specialJunk.isEmpty();
+  return QStringLiteral("VPN connect [%1]:")
+      .arg(hasAwgParameters ? QStringLiteral("AWG") : QStringLiteral("WireGuard"));
+}
+
 }  // namespace
 
 Daemon::Daemon(QObject* parent) : QObject(parent) {
@@ -67,38 +76,47 @@ bool Daemon::activate(const InterfaceConfig& config) {
   // At the end, if the activation succeds, the `connected` signal is emitted.
   // If the activation abort's for any reason `the `activationFailure` signal is
   // emitted.
-  logger.debug() << "Activating interface";
+  const QString logPrefix = vpnConnectLogPrefix(config);
+  logger.info() << logPrefix << "activation started for endpoint"
+                << logger.sensitive(QString("%1:%2").arg(config.m_serverIpv4AddrIn,
+                                                         QString::number(config.m_serverPort)));
   auto emit_failure_guard = qScopeGuard([this] { emit activationFailure(); });
 
   if (m_connections.contains(config.m_hopType)) {
     if (supportServerSwitching(config)) {
-      logger.debug() << "Already connected. Server switching supported.";
+      logger.info() << logPrefix << "already connected, switching server";
 
       if (!switchServer(config)) {
+        logger.error() << logPrefix << "server switch failed";
         return false;
       }
 
       if (!dnsutils()->restoreResolvers()) {
+        logger.error() << logPrefix << "failed to restore DNS resolvers before server switch";
         return false;
       }
 
       if (!maybeUpdateResolvers(config)) {
+        logger.error() << logPrefix << "failed to update DNS resolvers after server switch";
         return false;
       }
 
       bool status = run(Switch, config);
-      logger.debug() << "Connection status:" << status;
+      logger.info() << logPrefix << "server switch command status" << QString::number(status);
       if (status) {
         m_connections[config.m_hopType] = ConnectionState(config);
         m_handshakeTimer.start(HANDSHAKE_POLL_MSEC);
+        logger.info() << logPrefix << "server switch applied, waiting for server handshake";
         emit_failure_guard.dismiss();
         return true;
       }
+      logger.error() << logPrefix << "server switch command failed";
       return false;
     }
 
-    logger.warning() << "Already connected. Server switching not supported.";
+    logger.warning() << logPrefix << "already connected, full reconnect required";
     if (!deactivate(false)) {
+      logger.error() << logPrefix << "failed to deactivate previous tunnel before reconnect";
       return false;
     }
 
@@ -115,53 +133,73 @@ bool Daemon::activate(const InterfaceConfig& config) {
   // Bring up the wireguard interface if not already done.
   if (!wgutils()->interfaceExists()) {
     // Create the interface.
+    logger.info() << logPrefix << "creating tunnel interface";
     if (!wgutils()->addInterface(config)) {
-      logger.error() << "Interface creation failed.";
+      logger.error() << logPrefix << "interface creation failed";
       return false;
     }
+    logger.info() << logPrefix << "tunnel interface created";
+  } else {
+    logger.info() << logPrefix << "tunnel interface already exists";
   }
 
   // Bring the interface up.
   if (supportIPUtils()) {
+    logger.info() << logPrefix << "assigning interface IP addresses";
     if (!iputils()->addInterfaceIPs(config)) {
+      logger.error() << logPrefix << "failed to assign interface IP addresses";
       return false;
     }
+    logger.info() << logPrefix << "setting interface MTU and bringing interface up";
     if (!iputils()->setMTUAndUp(config)) {
+      logger.error() << logPrefix << "failed to set MTU or bring interface up";
       return false;
     }
+    logger.info() << logPrefix << "interface is up";
   }
 
   // Configure routing for excluded addresses.
   for (const QString& i : config.m_excludedAddresses) {
+    logger.info() << logPrefix << "adding exclusion route" << logger.sensitive(i);
     addExclusionRoute(IPAddress(i));
   }
 
   // Add the peer to this interface.
+  logger.info() << logPrefix << "configuring server peer";
   if (!wgutils()->updatePeer(config)) {
-    logger.error() << "Peer creation failed.";
+    logger.error() << logPrefix << "server peer configuration failed";
     return false;
   }
+  logger.info() << logPrefix << "server peer configured";
 
+  logger.info() << logPrefix << "updating DNS resolvers";
   if (!maybeUpdateResolvers(config)) {
+    logger.error() << logPrefix << "failed to update DNS resolvers";
     return false;
   }
+  logger.info() << logPrefix << "DNS resolvers updated";
 
   // set routing
+  logger.info() << logPrefix << "configuring allowed IP routes"
+                << QString::number(config.m_allowedIPAddressRanges.size());
   for (const IPAddress& ip : config.m_allowedIPAddressRanges) {
     if (!wgutils()->updateRoutePrefix(ip)) {
-      logger.debug() << "Routing configuration failed for" << ip.toString();
+      logger.error() << logPrefix << "routing configuration failed for" << logger.sensitive(ip.toString());
       return false;
     }
   }
+  logger.info() << logPrefix << "allowed IP routes configured";
 
   bool status = run(Up, config);
-  logger.debug() << "Connection status:" << status;
+  logger.info() << logPrefix << "interface up command status" << QString::number(status);
   if (status) {
     m_connections[config.m_hopType] = ConnectionState(config);
     m_handshakeTimer.start(HANDSHAKE_POLL_MSEC);
+    logger.info() << logPrefix << "local tunnel setup completed, waiting for server handshake";
     emit_failure_guard.dismiss();
     return true;
   }
+  logger.error() << logPrefix << "interface up command failed";
   return false;
 }
 
@@ -181,8 +219,12 @@ bool Daemon::maybeUpdateResolvers(const InterfaceConfig& config) {
     }
 
     if (!dnsutils()->updateResolvers(wgutils()->interfaceName(), resolvers)) {
+      logger.error() << vpnConnectLogPrefix(config) << "DNS resolver update failed for interface"
+                     << wgutils()->interfaceName();
       return false;
     }
+    logger.info() << vpnConnectLogPrefix(config) << "DNS resolvers applied to interface"
+                  << wgutils()->interfaceName();
   }
 
   return true;
@@ -617,16 +659,16 @@ QJsonObject Daemon::getStatus() {
 void Daemon::checkHandshake() {
   Q_ASSERT(wgutils() != nullptr);
 
-  logger.debug() << "Checking for handshake...";
-
   int pendingHandshakes = 0;
   QList<WireguardUtils::PeerStatus> peers = wgutils()->getPeerStatus();
   for (ConnectionState& connection : m_connections) {
     const InterfaceConfig& config = connection.m_config;
+    const QString logPrefix = vpnConnectLogPrefix(config);
     if (connection.m_date.isValid()) {
       continue;
     }
-    logger.debug() << "awaiting" << config.m_serverPublicKey;
+    logger.info() << logPrefix << "checking server handshake, peer statuses"
+                  << QString::number(peers.size());
 
     // Check if the handshake has completed.
     for (const WireguardUtils::PeerStatus& status : peers) {
@@ -635,11 +677,13 @@ void Daemon::checkHandshake() {
       }
       if (status.m_handshake != 0) {
         connection.m_date.setMSecsSinceEpoch(status.m_handshake);
+        logger.info() << logPrefix << "server handshake received, notifying client that VPN is connected";
         emit connected(status.m_pubkey);
       }
     }
 
     if (!connection.m_date.isValid()) {
+      logger.warning() << logPrefix << "server handshake is not available yet";
       pendingHandshakes++;
     }
   }

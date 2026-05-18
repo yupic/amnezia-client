@@ -69,20 +69,23 @@ ErrorCode XrayProtocol::start()
 {
     resetStopGuard();
 
-    qDebug() << "XrayProtocol::start()";
+    qDebug() << "VPN connect [VLESS]: start requested, remote" << m_remoteAddress
+             << "route mode" << static_cast<int>(m_routeMode);
 
     // Inject SOCKS5 auth into the inbound before starting xray.
     // Re-uses existing credentials if the config already has them (e.g. imported config).
     amnezia::serialization::inbounds::InboundCredentials creds;
     try {
+        qDebug() << "VPN connect [VLESS]: preparing local SOCKS inbound";
         creds = amnezia::serialization::inbounds::EnsureInboundAuth(m_xrayConfig);
     } catch (const std::exception &e) {
-        qCritical() << "EnsureInboundAuth failed:" << e.what();
+        qCritical() << "VPN connect [VLESS]: failed to prepare local SOCKS inbound:" << e.what();
         return ErrorCode::InternalError;
     }
     m_socksUser = creds.username;
     m_socksPassword = creds.password;
     m_socksPort = creds.port;
+    qDebug() << "VPN connect [VLESS]: local SOCKS inbound prepared on 127.0.0.1:" << m_socksPort;
 
     QString xrayConfigStr = QJsonDocument(m_xrayConfig).toJson(QJsonDocument::Compact);
     if (xrayConfigStr.isEmpty()) {
@@ -94,15 +97,20 @@ ErrorCode XrayProtocol::start()
 
     return IpcClient::withInterface(
             [&](QSharedPointer<IpcInterfaceReplica> iface) {
+                qDebug() << "VPN connect [VLESS]: starting Xray core";
                 auto xrayStart = iface->xrayStartOwned(xrayConfigStr);
                 if (!xrayStart.waitForFinished() || xrayStart.returnValue() == 0) {
-                    qCritical() << "Failed to start xray";
+                    qCritical() << "VPN connect [VLESS]: failed to start Xray core";
                     return ErrorCode::XrayExecutableCrashed;
                 }
                 m_xrayToken = xrayStart.returnValue();
+                qDebug() << "VPN connect [VLESS]: Xray core started";
                 return startTun2Socks();
             },
-            []() { return ErrorCode::AmneziaServiceConnectionFailed; });
+            []() {
+                qCritical() << "VPN connect [VLESS]: failed to connect to Amnezia service over IPC";
+                return ErrorCode::AmneziaServiceConnectionFailed;
+            });
 }
 
 void XrayProtocol::stop()
@@ -161,8 +169,10 @@ void XrayProtocol::stop()
 
 ErrorCode XrayProtocol::startTun2Socks()
 {
+    qDebug() << "VPN connect [VLESS]: creating privileged tun2socks process";
     m_tun2socksProcess = IpcClient::CreatePrivilegedProcess();
-    if (!m_tun2socksProcess->waitForSource()) {
+    if (!m_tun2socksProcess || !m_tun2socksProcess->waitForSource()) {
+        qCritical() << "VPN connect [VLESS]: failed to create privileged tun2socks process";
         return ErrorCode::AmneziaServiceConnectionFailed;
     }
 
@@ -170,13 +180,15 @@ ErrorCode XrayProtocol::startTun2Socks()
 
     m_tun2socksProcess->setProgram(PermittedProcess::Tun2Socks);
     m_tun2socksProcess->setArguments({ "-device", QString("tun://%1").arg(tunName), "-proxy", proxyUrl });
+    qDebug() << "VPN connect [VLESS]: starting tun2socks for" << tunName
+             << "through local SOCKS port" << m_socksPort;
 
     connect(
             m_tun2socksProcess.data(), &IpcProcessInterfaceReplica::readyReadStandardError, this, 
             [this]() {
                 auto readAllStandardError = m_tun2socksProcess->readAllStandardError();
                 if (!readAllStandardError.waitForFinished()) {
-                    qWarning() << "Failed to read output from tun2socks";
+                    qWarning() << "VPN connect [VLESS]: failed to read output from tun2socks";
                     return;
                 }
 
@@ -188,10 +200,13 @@ ErrorCode XrayProtocol::startTun2Socks()
                 if (line.contains("[STACK] tun://") && line.contains("<-> socks5://")) {
                     disconnect(m_tun2socksProcess.data(), &IpcProcessInterfaceReplica::readyReadStandardOutput, this, nullptr);
 
+                    qDebug() << "VPN connect [VLESS]: tun2socks network stack is ready";
                     if (ErrorCode res = setupRouting(); res != ErrorCode::NoError) {
+                        qCritical() << "VPN connect [VLESS]: routing setup failed with error" << res;
                         stop();
                         setLastError(res);
                     } else {
+                        qDebug() << "VPN connect [VLESS]: connection established, notifying client";
                         setConnectionState(Vpn::ConnectionState::Connected);
                     }
                 }
@@ -229,9 +244,9 @@ ErrorCode XrayProtocol::startTun2Socks()
                 m_tun2socksRetryCount = 0;
 
                 if (exitStatus == QProcess::ExitStatus::CrashExit) {
-                    qCritical() << "Tun2socks process crashed!";
+                    qCritical() << "VPN connect [VLESS]: tun2socks process crashed";
                 } else {
-                    qCritical() << QString("Tun2socks process was closed with %1 exit code").arg(exitCode);
+                    qCritical() << QString("VPN connect [VLESS]: tun2socks process exited with %1 exit code").arg(exitCode);
                 }
                 stop();
                 setLastError(ErrorCode::Tun2SockExecutableCrashed);
@@ -246,20 +261,26 @@ ErrorCode XrayProtocol::setupRouting()
 {
     return IpcClient::withInterface(
             [this](QSharedPointer<IpcInterfaceReplica> iface) -> ErrorCode {
+                qDebug() << "VPN connect [VLESS]: configuring TUN, DNS, routes and firewall";
 #ifdef Q_OS_WIN
                 const int inetAdapterIndex = NetworkUtilities::AdapterIndexTo(QHostAddress(m_remoteAddress));
+                qDebug() << "VPN connect [VLESS]: internet adapter index for remote" << m_remoteAddress
+                         << "is" << inetAdapterIndex;
 #endif
                 auto createTun = iface->createTun(tunName, amnezia::protocols::xray::defaultLocalAddr);
                 if (!createTun.waitForFinished() || !createTun.returnValue()) {
-                    qCritical() << "Failed to assign IP address for TUN";
+                    qCritical() << "VPN connect [VLESS]: failed to create or assign IP address for TUN" << tunName;
                     return ErrorCode::InternalError;
                 }
+                qDebug() << "VPN connect [VLESS]: TUN interface configured" << tunName
+                         << amnezia::protocols::xray::defaultLocalAddr;
 
                 auto updateResolvers = iface->updateResolvers(tunName, m_dnsServers);
                 if (!updateResolvers.waitForFinished() || !updateResolvers.returnValue()) {
-                    qCritical() << "Failed to set DNS resolvers for TUN";
+                    qCritical() << "VPN connect [VLESS]: failed to set DNS resolvers for TUN" << tunName;
                     return ErrorCode::InternalError;
                 }
+                qDebug() << "VPN connect [VLESS]: DNS resolvers configured for TUN" << tunName;
 
 #ifdef Q_OS_WIN
                 int vpnAdapterIndex = -1;
@@ -275,35 +296,43 @@ ErrorCode XrayProtocol::setupRouting()
 #endif
                 const bool killSwitchEnabled = QVariant(m_rawConfig.value(configKey::killSwitchOption).toString()).toBool();
                 if (killSwitchEnabled) {
+                    qDebug() << "VPN connect [VLESS]: enabling kill switch";
                     if (vpnAdapterIndex != -1) {
                         QJsonObject config = m_rawConfig;
                         config.insert("vpnServer", m_remoteAddress);
 
                         auto enableKillSwitch = IpcClient::Interface()->enableKillSwitch(config, vpnAdapterIndex);
                         if (!enableKillSwitch.waitForFinished() || !enableKillSwitch.returnValue()) {
-                            qCritical() << "Failed to enable killswitch";
+                            qCritical() << "VPN connect [VLESS]: failed to enable kill switch";
                             return ErrorCode::InternalError;
                         }
+                        qDebug() << "VPN connect [VLESS]: kill switch enabled";
                     } else
-                        qWarning() << "Failed to get vpnAdapterIndex. Killswitch disabled";
+                        qWarning() << "VPN connect [VLESS]: failed to get VPN adapter index, kill switch disabled";
                 }
 
                 if (m_routeMode == amnezia::RouteMode::VpnAllSites) {
                     static const QStringList subnets = { "1.0.0.0/8",  "2.0.0.0/7",  "4.0.0.0/6",  "8.0.0.0/5",
                                                          "16.0.0.0/4", "32.0.0.0/3", "64.0.0.0/2", "128.0.0.0/1" };
 
+                    qDebug() << "VPN connect [VLESS]: adding default IPv4 routes through TUN";
                     auto routeAddList = iface->routeAddList(m_vpnGateway, subnets);
-                    if (!routeAddList.waitForFinished() || routeAddList.returnValue() != subnets.count()) {
-                        qCritical() << "Failed to set routes for TUN";
+                    const bool routesFinished = routeAddList.waitForFinished();
+                    const int routesAdded = routesFinished ? routeAddList.returnValue() : -1;
+                    if (!routesFinished || routesAdded != subnets.count()) {
+                        qCritical() << "VPN connect [VLESS]: failed to set routes for TUN, added"
+                                    << routesAdded << "of" << subnets.count();
                         return ErrorCode::InternalError;
                     }
+                    qDebug() << "VPN connect [VLESS]: default IPv4 routes added through TUN";
                 }
 
                 auto StopRoutingIpv6 = iface->StopRoutingIpv6();
                 if (!StopRoutingIpv6.waitForFinished() || !StopRoutingIpv6.returnValue()) {
-                    qCritical() << "Failed to disable IPv6 routing";
+                    qCritical() << "VPN connect [VLESS]: failed to disable IPv6 routing";
                     return ErrorCode::InternalError;
                 }
+                qDebug() << "VPN connect [VLESS]: IPv6 routing disabled";
 
 #ifdef Q_OS_WIN
                 if (inetAdapterIndex != -1 && vpnAdapterIndex != -1) {
@@ -315,13 +344,18 @@ ErrorCode XrayProtocol::setupRouting()
 
                     auto enablePeerTraffic = iface->enablePeerTraffic(config);
                     if (!enablePeerTraffic.waitForFinished() || !enablePeerTraffic.returnValue()) {
-                        qCritical() << "Failed to enable peer traffic";
+                        qCritical() << "VPN connect [VLESS]: failed to enable peer traffic rules";
                         return ErrorCode::InternalError;
                     }
+                    qDebug() << "VPN connect [VLESS]: peer traffic rules enabled";
                 } else
-                    qWarning() << "Failed to get adapter indexes. Split-tunneling disabled";
+                    qWarning() << "VPN connect [VLESS]: failed to get adapter indexes, split tunneling disabled";
 #endif
+                qDebug() << "VPN connect [VLESS]: routing setup completed";
                 return ErrorCode::NoError;
             },
-            []() { return ErrorCode::AmneziaServiceConnectionFailed; });
+            []() {
+                qCritical() << "VPN connect [VLESS]: failed to connect to Amnezia service while setting routes";
+                return ErrorCode::AmneziaServiceConnectionFailed;
+            });
 }
