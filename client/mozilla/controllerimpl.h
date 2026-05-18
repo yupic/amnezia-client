@@ -73,13 +73,12 @@ class ControllerImpl : public QObject {
   void initialized(bool status, bool connected,
                    const QDateTime& connectionDate);
 
-  // These 2 signals can be dispatched at any time.
-  void connected(const QString& ifname, const QString& pubkey,
+  void connected(const QString& pubkey,
                  const QDateTime& connectionTimestamp = QDateTime());
-  void disconnected(const QString& ifname);
+  void disconnected();
 
-  void primaryReady(const QString& ifname);
-  void primaryFailed(const QString& ifname);
+  void primaryReady();
+  void primaryFailed();
 
   // This method should be emitted after a checkStatus() call.
   // "serverIpv4Gateway" is the current VPN tunnel gateway.

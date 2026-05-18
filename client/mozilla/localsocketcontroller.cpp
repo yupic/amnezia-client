@@ -85,7 +85,7 @@ void LocalSocketController::disconnectInternal() {
   m_daemonState = eReady;
   m_initializingRetry = 0;
   m_initializingTimer.stop();
-  emit disconnected(m_ifname);
+  emit disconnected();
 }
 
 void LocalSocketController::initialize(const Device* device, const Keys* keys) {
@@ -314,7 +314,7 @@ void LocalSocketController::deactivate() {
 
   if (m_daemonState != eReady) {
     logger.debug() << "No disconnect, controller is not ready";
-    emit disconnected(m_ifname);
+    emit disconnected();
     return;
   }
 
@@ -322,7 +322,7 @@ void LocalSocketController::deactivate() {
   json.insert("type", "deactivate");
   json.insert("ifname", m_ifname);
   write(json);
-  emit disconnected(m_ifname);
+  emit disconnected();
 }
 
 void LocalSocketController::checkStatus() {
@@ -513,22 +513,19 @@ void LocalSocketController::parseCommand(const QByteArray& command) {
 
     emit statusUpdated("", m_deviceIpv4, 0, 0);
 
-    const QString msgIfname = obj.value("ifname").toString(m_ifname);
-    emit connected(msgIfname, pubkey.toString());
+    emit connected(pubkey.toString());
     return;
   }
 
   if (type == "primaryReady") {
     if (!belongsToThisTunnel()) return;
-    const QString msgIfname = obj.value("ifname").toString(m_ifname);
-    emit primaryReady(msgIfname);
+    emit primaryReady();
     return;
   }
 
   if (type == "primaryFailed") {
     if (!belongsToThisTunnel()) return;
-    const QString msgIfname = obj.value("ifname").toString(m_ifname);
-    emit primaryFailed(msgIfname);
+    emit primaryFailed();
     return;
   }
 

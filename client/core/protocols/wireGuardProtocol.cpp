@@ -15,9 +15,8 @@ WireguardProtocol::WireguardProtocol(const QJsonObject &configuration, QObject *
     const QString ifname = configuration.value("ifname").toString();
     m_impl.reset(new LocalSocketController(ifname));
     connect(m_impl.get(), &ControllerImpl::connected, this,
-            [this](const QString& ifname, const QString &pubkey,
-                   const QDateTime &connectionTimestamp) {
-                Q_UNUSED(ifname)
+            [this](const QString& pubkey, const QDateTime&) {
+                Q_UNUSED(pubkey)
                 setConnectionState(Vpn::ConnectionState::Connected);
             });
     connect(m_impl.get(), &ControllerImpl::statusUpdated, this,
@@ -43,20 +42,11 @@ WireguardProtocol::WireguardProtocol(const QJsonObject &configuration, QObject *
             });
 
     connect(m_impl.get(), &ControllerImpl::disconnected, this,
-            [this](const QString& ifname) {
-                Q_UNUSED(ifname)
-                setConnectionState(Vpn::ConnectionState::Disconnected);
-            });
-    connect(m_impl.get(), &ControllerImpl::primaryReady, this,
-            [this](const QString& ifname) {
-                Q_UNUSED(ifname)
-                emit primaryReady();
-            });
-    connect(m_impl.get(), &ControllerImpl::primaryFailed, this,
-            [this](const QString& ifname) {
-                Q_UNUSED(ifname)
-                emit primaryFailed();
-            });
+            [this]() { setConnectionState(Vpn::ConnectionState::Disconnected); });
+    connect(m_impl.get(), &ControllerImpl::primaryReady,
+            this, &WireguardProtocol::primaryReady);
+    connect(m_impl.get(), &ControllerImpl::primaryFailed,
+            this, &WireguardProtocol::primaryFailed);
     m_impl->initialize(nullptr, nullptr);
 }
 
