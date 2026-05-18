@@ -615,6 +615,7 @@ void VpnConnection::onTunnelFailed(amnezia::ErrorCode error)
     if (tunnel == m_active) {
         m_trafficGuard->teardown();
         m_trafficGuard->revokeEndpoint(m_remoteAddress);
+        m_active->deactivate();
         releaseIfname(m_active->ifname());
         delete m_active;
         m_active = nullptr;
