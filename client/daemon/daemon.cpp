@@ -126,7 +126,6 @@ bool Daemon::activate(const QString& ifname, const InterfaceConfig& config) {
 
 bool Daemon::setPrimary(const QString& ifname, const InterfaceConfig& config) {
   logger.debug() << "setPrimary" << ifname;
-  auto failure_guard = qScopeGuard([this] { emit activationFailure(); });
 
   WireguardUtils* wg = m_tunnels.value(ifname);
   if (!wg) {
@@ -134,6 +133,11 @@ bool Daemon::setPrimary(const QString& ifname, const InterfaceConfig& config) {
     return false;
   }
   m_primaryIfname = ifname;
+
+  auto failure_guard = qScopeGuard([this, ifname] {
+    deactivateTunnel(ifname);
+    emit activationFailure();
+  });
 
   for (const QString& i : config.m_excludedAddresses) {
     addExclusionRoute(IPAddress(i));
